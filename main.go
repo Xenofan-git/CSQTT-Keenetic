@@ -1,0 +1,42 @@
+package main
+
+import (
+	"bufio"
+	"context"
+	"encoding/json"
+	"errors"
+	"flag"
+	"fmt"
+	"io"
+	"log"
+	"net"
+	"os"
+	"os/exec"
+	"os/signal"
+	"strings"
+	"syscall"
+	"time"
+	"unsafe"
+)
+
+const (
+	tunDevice = "/dev/net/tun"
+	tunName   = "csqtt0"
+	tunMTU    = 1300
+	udsName   = "csqtt_tun_uds"
+)
+
+type Config struct {
+	Client string `json:"client"`; Peer string `json:"peer"`; Password string `json:"password"`; VKHashes []string `json:"vk_hashes"`; Workers int `json:"workers"`; Obfs string `json:"obfs"`; TurnTransport string `json:"turn_transport"`; VKHashMode string `json:"vk_hash_mode"`; VKAuthMode string `json:"vk_auth_mode"`; Fingerprint string `json:"fingerprint"`; ClientIDs string `json:"client_ids"`; DeviceID string `json:"device_id"`; Generation uint64 `json:"generation"`; Salt string `json:"salt"`; CaptchaMode string `json:"captcha_mode"`
+}
+func defaults(c *Config){if c.Client==""{c.Client="/opt/etc/csqtt/client"};if c.Workers==0{c.Workers=18};if c.Obfs==""{c.Obfs="audio"};if c.TurnTransport==""{c.TurnTransport="udp"};if c.VKHashMode==""{c.VKHashMode="manual"};if c.VKAuthMode==""{c.VKAuthMode="vkcalls"};if c.Fingerprint==""{c.Fingerprint="chrome"};if c.CaptchaMode==""{c.CaptchaMode="auto"}}
+func loadConfig(path string)(Config,error){b,e:=os.ReadFile(path);if e!=nil{return Config{},e};var c Config;if e=json.Unmarshal(b,&c);e!=nil{return Config{},e};defaults(&c);return c,nil}
+func createTUN(name string)(*os.File,error){f,e:=os.OpenFile(tunDevice,os.O_RDWR,0);if e!=nil{return nil,fmt.Errorf("open %s: %w",tunDevice,e)};var ifr struct{Name [16]byte;Flags uint16;Pad [22]byte};if len(name)>=len(ifr.Name){f.Close();return nil,fmt.Errorf("TUN name too long: %q",name)};copy(ifr.Name[:],name);ifr.Flags=syscall.IFF_TUN|syscall.IFF_NO_PI;const tunsetiff=syscall.TUNSETIFF;_,_,errno:=syscall.Syscall(syscall.SYS_IOCTL,f.Fd(),uintptr(tunsetiff),uintptr(unsafe.Pointer(&ifr)));if errno!=0{f.Close();return nil,fmt.Errorf("TUNSETIFF %s: %w",name,errno)};if e:=syscall.SetNonblock(int(f.Fd()),true);e!=nil{f.Close();return nil,fmt.Errorf("set nonblock: %w",e)};return f,nil}
+func sendFD(udsName string,tun *os.File,timeout time.Duration)error{fd,e:=syscall.Socket(syscall.AF_UNIX,syscall.SOCK_STREAM|syscall.SOCK_CLOEXEC,0);if e!=nil{return fmt.Errorf("socket: %w",e)};defer syscall.Close(fd);sa:=&syscall.SockaddrUnix{Name:"\x00"+udsName};if e=syscall.Connect(fd,sa);e!=nil{return fmt.Errorf("connect @%s: %w",udsName,e)};oob:=syscall.UnixRights(int(tun.Fd()));if _,e=syscall.SendmsgN(fd,[]byte{1},oob,nil,0);e!=nil{return fmt.Errorf("send TUN fd: %w",e)};if e=syscall.SetNonblock(fd,true);e!=nil{return e};deadline:=time.Now().Add(timeout);buf:=make([]byte,1);for time.Now().Before(deadline){n,e:=syscall.Read(fd,buf);if e==nil{if n==1&&buf[0]==1{return nil};if n==0{return io.EOF};return fmt.Errorf("unexpected TUN ACK: %d/%d",n,buf[0])};if errors.Is(e,syscall.EAGAIN)||errors.Is(e,syscall.EWOULDBLOCK){time.Sleep(25*time.Millisecond);continue};return fmt.Errorf("read TUN ACK: %w",e)};return fmt.Errorf("timeout waiting for TUN ACK")}
+var ipCommand string
+func resolveIPCommand()(string,error){if ipCommand!=""{return ipCommand,nil};for _,p:=range []string{"/opt/sbin/ip","/opt/bin/ip","/usr/sbin/ip","/usr/bin/ip","/bin/ip","/sbin/ip"}{if st,e:=os.Stat(p);e==nil&&!st.IsDir(){ipCommand=p;return p,nil}};if p,e:=exec.LookPath("ip");e==nil{ipCommand=p;return p,nil};return "",fmt.Errorf("ip command not found (checked /opt/sbin/ip, /opt/bin/ip and PATH)")}
+func ip(args ...string)error{bin,e:=resolveIPCommand();if e!=nil{return e};out,e:=exec.Command(bin,args...).CombinedOutput();if e!=nil{return fmt.Errorf("%s %s: %w: %s",bin,strings.Join(args," "),e,strings.TrimSpace(string(out)))};return nil}
+func configureTUN(ipaddr string)error{p:=net.ParseIP(ipaddr);if p==nil||p.To4()==nil{return fmt.Errorf("server returned invalid IPv4 TUN address: %q",ipaddr)};if e:=ip("link","set","dev",tunName,"mtu",fmt.Sprint(tunMTU));e!=nil{return e};if e:=ip("addr","add",ipaddr+"/32","dev",tunName);e!=nil{return e};return ip("link","set","dev",tunName,"up")}
+func buildClientArgs(c Config)[]string{a:=[]string{"-peer",c.Peer,"-n",fmt.Sprint(c.Workers),"-tun-uds",udsName,"-vk-hash-mode",c.VKHashMode,"-obfs",c.Obfs,"-turn-transport",c.TurnTransport,"-vk-auth-mode",c.VKAuthMode,"-device-id",c.DeviceID,"-password",c.Password,"-gen",fmt.Sprint(c.Generation),"-salt",c.Salt,"-fingerprint",c.Fingerprint,"-captcha-mode",c.CaptchaMode};if c.ClientIDs!=""{a=append(a,"-client-ids",c.ClientIDs)};if len(c.VKHashes)>0{a=append(a,"-vk",strings.Join(c.VKHashes,","))};return a}
+func waitForTUNCONF(lines <-chan string,timeout time.Duration)(string,error){t:=time.NewTimer(timeout);defer t.Stop();for{select{case line,ok:=<-lines:if !ok{return "",fmt.Errorf("client stdout closed before TUNCONF")};if strings.Contains(line,"TUNCONF:"){p:=strings.Index(line,"TUNCONF:");v:=strings.TrimSpace(line[p+len("TUNCONF:"):]);f:=strings.Split(v,":");if len(f)>=2&&f[0]!=""{return f[0],nil}};case <-t.C:return "",fmt.Errorf("timeout waiting for TUNCONF")}}}
+func main(){configPath:=flag.String("config","/opt/etc/csqtt/config.json","config JSON");flag.Parse();log.SetFlags(log.LstdFlags|log.Lmicroseconds);c,e:=loadConfig(*configPath);if e!=nil{log.Fatalf("config: %v",e)};if c.Peer==""||c.Password==""||c.DeviceID==""{log.Fatalf("config requires peer, password and device_id")};if c.VKHashMode=="manual"&&len(c.VKHashes)==0{log.Fatalf("manual vk_hash_mode requires at least one vk_hash")};tun,e:=createTUN(tunName);if e!=nil{log.Fatalf("TUN: %v",e)};defer tun.Close();log.Printf("TUN created: %s fd=%d mtu=%d",tunName,tun.Fd(),tunMTU);ctx,stop:=signal.NotifyContext(context.Background(),os.Interrupt,syscall.SIGTERM);defer stop();cmd:=exec.CommandContext(ctx,c.Client,buildClientArgs(c)...);cmd.Env=append(os.Environ(),"CSQTT_EVENTS=1");cmd.Stderr=os.Stderr;stdout,e:=cmd.StdoutPipe();if e!=nil{log.Fatalf("stdout pipe: %v",e)};if e=cmd.Start();e!=nil{log.Fatalf("start client: %v",e)};log.Printf("client started pid=%d",cmd.Process.Pid);done:=make(chan error,1);go func(){done<-cmd.Wait()}();lines:=make(chan string,128);go func(){defer close(lines);s:=bufio.NewScanner(stdout);s.Buffer(make([]byte,4096),1024*1024);for s.Scan(){line:=s.Text();log.Printf("CLIENT %s",line);select{case lines<-line:case <-ctx.Done():return}};if e:=s.Err();e!=nil{log.Printf("client stdout: %v",e)}}();sent:=false;for i:=0;i<40&&!sent;i++{if e:=sendFD(udsName,tun,3*time.Second);e==nil{sent=true;log.Printf("TUN FD accepted by client");break}else{log.Printf("waiting for client UDS: %v",e);select{case e:=<-done:log.Fatalf("client exited before TUN FD transfer: %v",e);case <-ctx.Done():return;case <-time.After(250*time.Millisecond)}}};if !sent{_ = cmd.Process.Kill();<-done;log.Fatal("could not pass TUN FD to client")};clientIP,e:=waitForTUNCONF(lines,30*time.Second);if e!=nil{_ = cmd.Process.Kill();log.Fatalf("TUNCONF: %v",e)};log.Printf("server assigned TUN IP: %s",clientIP);if e=configureTUN(clientIP);e!=nil{_ = cmd.Process.Kill();log.Fatalf("configure TUN: %v",e)};log.Printf("TUN configured: %s %s/32 mtu=%d",tunName,clientIP,tunMTU);e=<-done;if e!=nil{log.Printf("client exited: %v",e)}else{log.Printf("client exited cleanly")};_ = ip("link","set","dev",tunName,"down")}
