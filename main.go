@@ -1,35 +1,27 @@
 package main
 
 import (
-	"bufio"
-	"context"
-	"encoding/json"
-	"errors"
-	"flag"
-	"fmt"
-	"io"
-	"log"
-	"net"
-	"os"
-	"os/exec"
-	"os/signal"
-	"strings"
-	"syscall"
-	"time"
-	"unsafe"
+    "bufio"
+    "context"
+    "encoding/json"
+    "errors"
+    "flag"
+    "fmt"
+    "io"
+    "log"
+    "net"
+    "os"
+    "os/exec"
+    "os/signal"
+    "strings"
+    "syscall"
+    "time"
+    "unsafe"
 )
 
-const (
-	tunDevice = "/dev/net/tun"
-	tunName   = "csqtt0"
-	tunMTU    = 1300
-	udsName   = "csqtt_tun_uds"
-)
-
-type Config struct {
-	Client string `json:"client"`; Peer string `json:"peer"`; Password string `json:"password"`; VKHashes []string `json:"vk_hashes"`; Workers int `json:"workers"`; Obfs string `json:"obfs"`; TurnTransport string `json:"turn_transport"`; VKHashMode string `json:"vk_hash_mode"`; VKAuthMode string `json:"vk_auth_mode"`; Fingerprint string `json:"fingerprint"`; ClientIDs string `json:"client_ids"`; DeviceID string `json:"device_id"`; Generation uint64 `json:"generation"`; Salt string `json:"salt"`; CaptchaMode string `json:"captcha_mode"`
-}
-func defaults(c *Config){if c.Client==""{c.Client="/opt/etc/csqtt/client"};if c.Workers==0{c.Workers=18};if c.Obfs==""{c.Obfs="audio"};if c.TurnTransport==""{c.TurnTransport="udp"};if c.VKHashMode==""{c.VKHashMode="manual"};if c.VKAuthMode==""{c.VKAuthMode="vkcalls"};if c.Fingerprint==""{c.Fingerprint="chrome"};if c.CaptchaMode==""{c.CaptchaMode="auto"}}
+const ( tunDevice="/dev/net/tun"; tunName="csqtt0"; tunMTU=1300; udsName="csqtt_tun_uds" )
+type Config struct { Client string `json:"client"`; Peer string `json:"peer"`; Password string `json:"password"`; VKHashes []string `json:"vk_hashes"`; Workers int `json:"workers"`; Obfs string `json:"obfs"`; TurnTransport string `json:"turn_transport"`; VKHashMode string `json:"vk_hash_mode"`; VKAuthMode string `json:"vk_auth_mode"`; Fingerprint string `json:"fingerprint"`; ClientIDs string `json:"client_ids"`; DeviceID string `json:"device_id"`; Generation uint64 `json:"generation"`; Salt string `json:"salt"`; CaptchaMode string `json:"captcha_mode"` }
+func defaults(c *Config){ if c.Client==""{c.Client="/opt/etc/csqtt/client"}; if c.Workers==0{c.Workers=18}; if c.Obfs==""{c.Obfs="audio"}; if c.TurnTransport==""{c.TurnTransport="udp"}; if c.VKHashMode==""{c.VKHashMode="manual"}; if c.VKAuthMode==""{c.VKAuthMode="vkcalls"}; if c.Fingerprint==""{c.Fingerprint="chrome"}; if c.CaptchaMode==""{c.CaptchaMode="auto"} }
 func loadConfig(path string)(Config,error){b,e:=os.ReadFile(path);if e!=nil{return Config{},e};var c Config;if e=json.Unmarshal(b,&c);e!=nil{return Config{},e};defaults(&c);return c,nil}
 func createTUN(name string)(*os.File,error){f,e:=os.OpenFile(tunDevice,os.O_RDWR,0);if e!=nil{return nil,fmt.Errorf("open %s: %w",tunDevice,e)};var ifr struct{Name [16]byte;Flags uint16;Pad [22]byte};if len(name)>=len(ifr.Name){f.Close();return nil,fmt.Errorf("TUN name too long: %q",name)};copy(ifr.Name[:],name);ifr.Flags=syscall.IFF_TUN|syscall.IFF_NO_PI;const tunsetiff=syscall.TUNSETIFF;_,_,errno:=syscall.Syscall(syscall.SYS_IOCTL,f.Fd(),uintptr(tunsetiff),uintptr(unsafe.Pointer(&ifr)));if errno!=0{f.Close();return nil,fmt.Errorf("TUNSETIFF %s: %w",name,errno)};if e:=syscall.SetNonblock(int(f.Fd()),true);e!=nil{f.Close();return nil,fmt.Errorf("set nonblock: %w",e)};return f,nil}
 func sendFD(udsName string,tun *os.File,timeout time.Duration)error{fd,e:=syscall.Socket(syscall.AF_UNIX,syscall.SOCK_STREAM|syscall.SOCK_CLOEXEC,0);if e!=nil{return fmt.Errorf("socket: %w",e)};defer syscall.Close(fd);sa:=&syscall.SockaddrUnix{Name:"\x00"+udsName};if e=syscall.Connect(fd,sa);e!=nil{return fmt.Errorf("connect @%s: %w",udsName,e)};oob:=syscall.UnixRights(int(tun.Fd()));if _,e=syscall.SendmsgN(fd,[]byte{1},oob,nil,0);e!=nil{return fmt.Errorf("send TUN fd: %w",e)};if e=syscall.SetNonblock(fd,true);e!=nil{return e};deadline:=time.Now().Add(timeout);buf:=make([]byte,1);for time.Now().Before(deadline){n,e:=syscall.Read(fd,buf);if e==nil{if n==1&&buf[0]==1{return nil};if n==0{return io.EOF};return fmt.Errorf("unexpected TUN ACK: %d/%d",n,buf[0])};if errors.Is(e,syscall.EAGAIN)||errors.Is(e,syscall.EWOULDBLOCK){time.Sleep(25*time.Millisecond);continue};return fmt.Errorf("read TUN ACK: %w",e)};return fmt.Errorf("timeout waiting for TUN ACK")}
