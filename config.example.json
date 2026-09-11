@@ -1,0 +1,17 @@
+{
+  "client": "/opt/etc/csqtt/client",
+  "peer": "YOUR_SERVER:46000",
+  "password": "YOUR_TUNNEL_PASSWORD",
+  "vk_hashes": ["YOUR_VK_HASH"],
+  "workers": 18,
+  "obfs": "audio",
+  "turn_transport": "udp",
+  "vk_hash_mode": "manual",
+  "vk_auth_mode": "vkcalls",
+  "fingerprint": "chrome",
+  "client_ids": "",
+  "device_id": "hopper-csqtt-CHANGE-ME",
+  "generation": 1,
+  "salt": "CHANGE-ME",
+  "captcha_mode": "auto"
+}
