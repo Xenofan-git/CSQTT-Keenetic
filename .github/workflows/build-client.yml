@@ -1,0 +1,56 @@
+name: Build CSQTT client ARM64
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/build-client.yml'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout manager repo
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-unknown-linux-musl
+
+      - name: Install Zig and cargo-zigbuild
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install ziglang
+          cargo install cargo-zigbuild --locked
+
+      - name: Download CSQTT source 2.1.9
+        run: |
+          curl -L --fail -o csqtt.tar.gz https://github.com/amurcanov/csqtt/archive/refs/tags/v2.1.9.tar.gz
+          tar -xzf csqtt.tar.gz
+
+      - name: Build ARM64 client
+        working-directory: csqtt-2.1.9/rust-client
+        env:
+          RUSTFLAGS: '-C target-feature=+crt-static'
+        run: |
+          cargo zigbuild --release --target aarch64-unknown-linux-musl
+          file target/aarch64-unknown-linux-musl/release/client
+          sha256sum target/aarch64-unknown-linux-musl/release/client
+
+      - name: Package
+        run: |
+          mkdir -p dist
+          cp csqtt-2.1.9/rust-client/target/aarch64-unknown-linux-musl/release/client dist/client
+          chmod 755 dist/client
+          tar -C dist -czf CSQTT-client-2.1.9-aarch64-k3.10.tar.gz client
+          sha256sum dist/client CSQTT-client-2.1.9-aarch64-k3.10.tar.gz | tee SHA256SUMS
+
+      - name: Upload client artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: CSQTT-client-2.1.9-aarch64-k3.10
+          path: |
+            dist/client
+            CSQTT-client-2.1.9-aarch64-k3.10.tar.gz
+            SHA256SUMS
