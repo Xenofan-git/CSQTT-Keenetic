@@ -27,11 +27,12 @@ jobs:
       - name: Install Zig and cargo-zigbuild
         run: |
           python3 -m pip install --upgrade pip
-          python3 -m pip install ziglang
+          python3 -m pip install --user ziglang
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           cargo install cargo-zigbuild --locked
           rustc --version
           cargo --version
-          zig version
+          "$HOME/.local/bin/zig" version
           cargo zigbuild --version
 
       - name: Download CSQTT source 2.1.9
