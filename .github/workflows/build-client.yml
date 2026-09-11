@@ -13,9 +13,15 @@ jobs:
       - name: Checkout manager repo
         uses: actions/checkout@v4
 
+      - name: Install native build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y nasm cmake
+
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
+          toolchain: 1.98.1
           targets: aarch64-unknown-linux-musl
 
       - name: Install Zig and cargo-zigbuild
@@ -23,6 +29,10 @@ jobs:
           python3 -m pip install --upgrade pip
           python3 -m pip install ziglang
           cargo install cargo-zigbuild --locked
+          rustc --version
+          cargo --version
+          zig version
+          cargo zigbuild --version
 
       - name: Download CSQTT source 2.1.9
         run: |
@@ -34,7 +44,7 @@ jobs:
         env:
           RUSTFLAGS: '-C target-feature=+crt-static'
         run: |
-          cargo zigbuild --release --target aarch64-unknown-linux-musl
+          cargo zigbuild --release --target aarch64-unknown-linux-musl -vv
           file target/aarch64-unknown-linux-musl/release/client
           sha256sum target/aarch64-unknown-linux-musl/release/client
 
