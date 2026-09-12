@@ -40,7 +40,7 @@ jobs:
 
       - name: Download CSQTT source 2.1.9
         run: |
-          curl -L --fail -o csqtt.tar.gz https://github.com/amurcanov/csqтt/archive/refs/tags/v2.1.9.tar.gz
+          curl -L --fail -o csqtt.tar.gz https://github.com/amurcanov/csqtt/archive/refs/tags/v2.1.9.tar.gz
           tar -xzf csqtt.tar.gz
 
       - name: Patch musl UDP and ARM64 compatibility
@@ -109,11 +109,8 @@ jobs:
           exec zig cc -target aarch64-linux-musl "${args[@]}"
           EOF
           chmod +x "$RUNNER_TEMP/zig-cc-aarch64-musl"
-          ln -sf "$RUNNER_TEMP/zig-cc-aarch64-musl" "$RUNNER_TEMP/zig-cc-aarch64-linux-musl"
           echo '=== Zig ARM64 wrapper ==='
           cat "$RUNNER_TEMP/zig-cc-aarch64-musl"
-          "$RUNNER_TEMP/zig-cc-aarch64-musl" --target=aarch64-unknown-linux-musl -D__ARM_ARCH=8 -c /dev/null -o "$RUNNER_TEMP/test.o" 2>&1 || true
-          rm -f "$RUNNER_TEMP/test.o"
           echo '=== toolchain ==='
           rustc --version
           cargo --version
