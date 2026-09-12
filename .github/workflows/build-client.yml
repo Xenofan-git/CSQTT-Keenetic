@@ -21,7 +21,7 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.97.1
+          toolchain: 1.98.1
           targets: aarch64-unknown-linux-musl
 
       - name: Install Zig and cargo-zigbuild
@@ -43,71 +43,22 @@ jobs:
           curl -L --fail -o csqtt.tar.gz https://github.com/amurcanov/csqtt/archive/refs/tags/v2.1.9.tar.gz
           tar -xzf csqtt.tar.gz
 
-      - name: Patch musl UDP batch compatibility
+      - name: Patch musl UDP compatibility
         working-directory: csqtt-2.1.9/rust-client
         run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          import re
-
-          p = Path("udp_batch.rs")
-          s = p.read_text()
-          original = s
-
-          # libc's Linux-musl recvmmsg/sendmmsg vlen parameter is c_uint.
-          # Keep the wrappers explicitly aligned with that ABI.
-          s = s.replace(
-              "messages: *mut libc::mmsghdr,\n        count: libc::c_int,",
-              "messages: *mut libc::mmsghdr,\n        count: libc::c_uint,",
-          )
-
-          # Newer libc makes musl msghdr padding fields private. Construct it
-          # with zeroed memory and assign the public fields instead of using a
-          # struct literal that must mention the private padding fields.
-          old = '''    fn mmsg_header(iovec: *mut libc::iovec) -> libc::mmsghdr {
-        libc::mmsghdr {
-            msg_hdr: libc::msghdr {
-                msg_name: ptr::null_mut(),
-                msg_namelen: 0,
-                msg_iov: iovec,
-                msg_iovlen: 1,
-                msg_control: ptr::null_mut(),
-                msg_controllen: 0,
-                msg_flags: 0,
-            },
-            msg_len: 0,
-        }
-    }
-'''
-          new = '''    fn mmsg_header(iovec: *mut libc::iovec) -> libc::mmsghdr {
-        let mut msg_hdr: libc::msghdr = unsafe { std::mem::zeroed() };
-        msg_hdr.msg_name = ptr::null_mut();
-        msg_hdr.msg_namelen = 0;
-        msg_hdr.msg_iov = iovec;
-        msg_hdr.msg_iovlen = 1;
-        msg_hdr.msg_control = ptr::null_mut();
-        msg_hdr.msg_controllen = 0;
-        msg_hdr.msg_flags = 0;
-        libc::mmsghdr {
-            msg_hdr,
-            msg_len: 0,
-        }
-    }
-'''
-          if old not in s:
-              raise SystemExit("Expected mmsg_header implementation was not found; refusing an unsafe patch")
-          s = s.replace(old, new, 1)
-
-          if s == original:
-              raise SystemExit("Patch made no changes")
-          p.write_text(s)
-          print("Patched udp_batch.rs for current musl libc")
-          PY
-
-          echo '=== patched signatures ==='
-          grep -n -A6 'unsafe fn recv_mmsg\|unsafe fn send_mmsg' udp_batch.rs
-          echo '=== patched msghdr constructor ==='
-          grep -n -A16 'fn mmsg_header' udp_batch.rs
+          set -e
+          # Be tolerant of either c_int or c_uint in the upstream wrapper.
+          sed -i 's/count: libc::c_int/count: libc::c_uint/g' udp_batch.rs
+          # Explicitly cast the Linux libc vlen argument to the ABI type.
+          sed -i 's/libc::recvmmsg(fd, messages, count, flags, timeout)/libc::recvmmsg(fd, messages, count as libc::c_uint, flags, timeout)/g' udp_batch.rs
+          sed -i 's/libc::sendmmsg(fd, messages, count, flags)/libc::sendmmsg(fd, messages, count as libc::c_uint, flags)/g' udp_batch.rs
+          # libc 0.2.189 exposes musl msghdr padding fields as private. Avoid
+          # struct-literal construction and initialize the public fields after
+          # zeroing the ABI struct.
+          perl -0pi -e 's{    fn mmsg_header\(iovec: \*mut libc::iovec\) -> libc::mmsghdr \{\n        libc::mmsghdr \{\n            msg_hdr: libc::msghdr \{\n                msg_name: ptr::null_mut\(\),\n                msg_namelen: 0,\n                msg_iov: iovec,\n                msg_iovlen: 1,\n                msg_control: ptr::null_mut\(\),\n                msg_controllen: 0,\n                msg_flags: 0,\n            \},\n            msg_len: 0,\n        \}\n    \}}{    fn mmsg_header(iovec: *mut libc::iovec) -> libc::mmsghdr {\n        let mut msg_hdr: libc::msghdr = unsafe { std::mem::zeroed() };\n        msg_hdr.msg_name = ptr::null_mut();\n        msg_hdr.msg_namelen = 0;\n        msg_hdr.msg_iov = iovec;\n        msg_hdr.msg_iovlen = 1;\n        msg_hdr.msg_control = ptr::null_mut();\n        msg_hdr.msg_controllen = 0;\n        msg_hdr.msg_flags = 0;\n        libc::mmsghdr {\n            msg_hdr,\n            msg_len: 0,\n        }\n    }}' udp_batch.rs
+          echo '=== compatibility patch check ==='
+          grep -n -A8 'unsafe fn recv_mmsg\|unsafe fn send_mmsg' udp_batch.rs
+          grep -n -A14 'fn mmsg_header' udp_batch.rs
 
       - name: Build ARM64 client
         working-directory: csqtt-2.1.9/rust-client
