@@ -103,6 +103,9 @@ jobs:
                 skip_next=1
                 continue
                 ;;
+              -Wl,--fix-cortex-a53-843419)
+                continue
+                ;;
               *)
                 args+=("$arg")
                 ;;
