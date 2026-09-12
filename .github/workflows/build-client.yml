@@ -47,12 +47,6 @@ jobs:
         working-directory: csqtt-2.1.9/rust-client
         run: |
           set -e
-
-          # zstd-sys 2.0.16+zstd.1.5.7 unconditionally adds the x86-64
-          # huf_decompress_amd64.S unless its no_asm feature is enabled.
-          # That assembly cannot be compiled for aarch64-musl. Make the
-          # feature part of the dependency graph so Cargo enables it for the
-          # transitive zstd-sys used by the CSQTT dependency chain.
           python3 - <<'PY'
           from pathlib import Path
           p = Path('Cargo.toml')
@@ -67,17 +61,10 @@ jobs:
           print('=== zstd ARM64 compatibility ===')
           print(dep)
           PY
-
-          # Be tolerant of either c_int or c_uint in the upstream wrapper.
           sed -i 's/count: libc::c_int/count: libc::c_uint/g' udp_batch.rs
-          # Explicitly cast the Linux libc vlen argument to the ABI type.
           sed -i 's/libc::recvmmsg(fd, messages, count, flags, timeout)/libc::recvmmsg(fd, messages, count as libc::c_uint, flags, timeout)/g' udp_batch.rs
           sed -i 's/libc::sendmmsg(fd, messages, count, flags)/libc::sendmmsg(fd, messages, count as libc::c_uint, flags)/g' udp_batch.rs
-          # libc 0.2.189 exposes musl msghdr padding fields as private. Avoid
-          # struct-literal construction and initialize the public fields after
-          # zeroing the ABI struct.
           perl -0pi -e 's{    fn mmsg_header\(iovec: \*mut libc::iovec\) -> libc::mmsghdr \{\n        libc::mmsghdr \{\n            msg_hdr: libc::msghdr \{\n                msg_name: ptr::null_mut\(\),\n                msg_namelen: 0,\n                msg_iov: iovec,\n                msg_iovlen: 1,\n                msg_control: ptr::null_mut\(\),\n                msg_controllen: 0,\n                msg_flags: 0,\n            \},\n            msg_len: 0,\n        \}\n    \}}{    fn mmsg_header(iovec: *mut libc::iovec) -> libc::mmsghdr {\n        let mut msg_hdr: libc::msghdr = unsafe { std::mem::zeroed() };\n        msg_hdr.msg_name = ptr::null_mut();\n        msg_hdr.msg_namelen = 0;\n        msg_hdr.msg_iov = iovec;\n        msg_hdr.msg_iovlen = 1;\n        msg_hdr.msg_control = ptr::null_mut();\n        msg_hdr.msg_controllen = 0;\n        msg_hdr.msg_flags = 0;\n        libc::mmsghdr {\n            msg_hdr,\n            msg_len: 0,\n        }\n    }}' udp_batch.rs
-
           echo '=== compatibility patch check ==='
           grep -n -A8 'unsafe fn recv_mmsg\|unsafe fn send_mmsg' udp_batch.rs
           grep -n -A14 'fn mmsg_header' udp_batch.rs
@@ -102,7 +89,7 @@ jobs:
           echo '=== cross compiler ==='
           zig cc -target aarch64-linux-musl --version
           echo '=== cargo build ==='
-          cargo zigbuild --locked --release --target aarch64-unknown-linux-musl -vv
+          cargo zigbuild --release --target aarch64-unknown-linux-musl -vv
           file target/aarch64-unknown-linux-musl/release/client
           readelf -h target/aarch64-unknown-linux-musl/release/client
           readelf -d target/aarch64-unknown-linux-musl/release/client || true
