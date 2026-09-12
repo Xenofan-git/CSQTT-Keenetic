@@ -40,7 +40,7 @@ jobs:
 
       - name: Download CSQTT source 2.1.9
         run: |
-          curl -L --fail -o csqtt.tar.gz https://github.com/amurcanov/csqtt/archive/refs/tags/v2.1.9.tar.gz
+          curl -L --fail -o csqtt.tar.gz https://github.com/amurcanov/csqтt/archive/refs/tags/v2.1.9.tar.gz
           tar -xzf csqtt.tar.gz
 
       - name: Patch musl UDP and ARM64 compatibility
@@ -75,14 +75,45 @@ jobs:
         env:
           AWS_LC_SYS_CMAKE_BUILDER: '0'
           AWS_LC_SYS_STATIC: '1'
-          AWS_LC_SYS_TARGET_CC: 'zig cc -target aarch64-linux-musl'
-          AWS_LC_SYS_CC: 'zig cc -target aarch64-linux-musl'
           AWS_LC_SYS_CFLAGS_aarch64_unknown_linux_musl: '-D__ARM_ARCH=8'
           RUST_BACKTRACE: '1'
-          CC_aarch64_unknown_linux_musl: 'zig cc -target aarch64-linux-musl'
-          AR_aarch64_unknown_linux_musl: 'zig ar'
-          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: 'zig cc'
         run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/zig-cc-aarch64-musl" <<'EOF'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          args=()
+          skip_next=0
+          for arg in "$@"; do
+            if [[ "$skip_next" -eq 1 ]]; then
+              skip_next=0
+              continue
+            fi
+            case "$arg" in
+              --target)
+                skip_next=1
+                continue
+                ;;
+              --target=*|-target=*)
+                continue
+                ;;
+              -target)
+                skip_next=1
+                continue
+                ;;
+              *)
+                args+=("$arg")
+                ;;
+            esac
+          done
+          exec zig cc -target aarch64-linux-musl "${args[@]}"
+          EOF
+          chmod +x "$RUNNER_TEMP/zig-cc-aarch64-musl"
+          ln -sf "$RUNNER_TEMP/zig-cc-aarch64-musl" "$RUNNER_TEMP/zig-cc-aarch64-linux-musl"
+          echo '=== Zig ARM64 wrapper ==='
+          cat "$RUNNER_TEMP/zig-cc-aarch64-musl"
+          "$RUNNER_TEMP/zig-cc-aarch64-musl" --target=aarch64-unknown-linux-musl -D__ARM_ARCH=8 -c /dev/null -o "$RUNNER_TEMP/test.o" 2>&1 || true
+          rm -f "$RUNNER_TEMP/test.o"
           echo '=== toolchain ==='
           rustc --version
           cargo --version
@@ -90,12 +121,15 @@ jobs:
           echo '=== target ==='
           rustc --print target-spec-json --target aarch64-unknown-linux-musl 2>/dev/null || true
           echo '=== cross compiler ==='
-          zig cc -target aarch64-linux-musl --version
+          "$RUNNER_TEMP/zig-cc-aarch64-musl" --version
           echo '=== AWS-LC cross environment ==='
-          echo "AWS_LC_SYS_TARGET_CC=$AWS_LC_SYS_TARGET_CC"
-          echo "AWS_LC_SYS_CC=$AWS_LC_SYS_CC"
           echo "AWS_LC_SYS_CFLAGS_aarch64_unknown_linux_musl=$AWS_LC_SYS_CFLAGS_aarch64_unknown_linux_musl"
           echo '=== cargo build ==='
+          CC_aarch64_unknown_linux_musl="$RUNNER_TEMP/zig-cc-aarch64-musl" \
+          AR_aarch64_unknown_linux_musl='zig ar' \
+          AWS_LC_SYS_CC="$RUNNER_TEMP/zig-cc-aarch64-musl" \
+          AWS_LC_SYS_TARGET_CC="$RUNNER_TEMP/zig-cc-aarch64-musl" \
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER="$RUNNER_TEMP/zig-cc-aarch64-musl" \
           cargo zigbuild --release --target aarch64-unknown-linux-musl -vv
           file target/aarch64-unknown-linux-musl/release/client
           readelf -h target/aarch64-unknown-linux-musl/release/client
