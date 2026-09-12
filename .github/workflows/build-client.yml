@@ -86,35 +86,40 @@ jobs:
           set -euo pipefail
           args=()
           skip_next=0
+          compile=0
           for arg in "$@"; do
             if [[ "$skip_next" -eq 1 ]]; then
               skip_next=0
               continue
             fi
             case "$arg" in
-              --target)
+              --target|-target)
                 skip_next=1
                 continue
                 ;;
               --target=*|-target=*)
                 continue
                 ;;
-              -target)
-                skip_next=1
-                continue
-                ;;
               -Wl,--fix-cortex-a53-843419)
                 continue
+                ;;
+              -c)
+                compile=1
+                args+=("$arg")
                 ;;
               *)
                 args+=("$arg")
                 ;;
             esac
           done
-          # Rust's musl target supplies its own crt1/crti/crtbegin/crtend/crtn.
-          # Prevent Zig from adding a second startup set while retaining its
-          # aarch64-musl sysroot and explicit -lc/-lunwind supplied by rustc.
-          exec zig cc -target aarch64-linux-musl -nostdlib "${args[@]}"
+          echo "[zig-wrapper] compile=$compile args=${args[*]}" >&2
+          if [[ "$compile" -eq 1 ]]; then
+            exec zig cc -target aarch64-linux-musl "${args[@]}"
+          else
+            # rustc supplies the musl CRT objects itself; prevent Zig from
+            # injecting another crt1/crti/crtbegin set during final linking.
+            exec zig cc -target aarch64-linux-musl -nostdlib "${args[@]}"
+          fi
           EOF
           chmod +x "$RUNNER_TEMP/zig-cc-aarch64-musl"
           echo '=== Zig ARM64 wrapper ==='
