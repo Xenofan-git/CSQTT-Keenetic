@@ -84,14 +84,17 @@ jobs:
           cat > "$RUNNER_TEMP/zig-cc-aarch64-musl" <<'EOF'
           #!/usr/bin/env bash
           set -euo pipefail
+
           args=()
           skip_next=0
           compile=0
+
           for arg in "$@"; do
             if [[ "$skip_next" -eq 1 ]]; then
               skip_next=0
               continue
             fi
+
             case "$arg" in
               --target|-target)
                 skip_next=1
@@ -112,16 +115,21 @@ jobs:
                 ;;
             esac
           done
-          echo "[zig-wrapper] compile=$compile args=${args[*]}" >&2
+
+          echo "[zig-wrapper] mode=$([[ "$compile" -eq 1 ]] && echo compile || echo link)" >&2
+          echo "[zig-wrapper] args=${args[*]}" >&2
+
           if [[ "$compile" -eq 1 ]]; then
             exec zig cc -target aarch64-linux-musl "${args[@]}"
           else
-            # rustc supplies the musl CRT objects itself; prevent Zig from
-            # injecting another crt1/crti/crtbegin set during final linking.
-            exec zig cc -target aarch64-linux-musl -nostdlib "${args[@]}"
+            # rustc's musl target is self-contained and supplies its own
+            # startup objects. Zig must therefore not add another crt1/crti
+            # set, but we still need Zig's musl libc/libgcc runtime libraries.
+            exec zig cc -target aarch64-linux-musl -nostartfiles "${args[@]}"
           fi
           EOF
           chmod +x "$RUNNER_TEMP/zig-cc-aarch64-musl"
+
           echo '=== Zig ARM64 wrapper ==='
           cat "$RUNNER_TEMP/zig-cc-aarch64-musl"
           echo '=== toolchain ==='
