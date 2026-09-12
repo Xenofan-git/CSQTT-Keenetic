@@ -40,8 +40,10 @@ jobs:
 
       - name: Download CSQTT source 2.1.9
         run: |
-          curl -L --fail -o csqtt.tar.gz https://github.com/amurcanov/csqtt/archive/refs/tags/v2.1.9.tar.gz
-          tar -xzf csqtt.tar.gz
+          set -euo pipefail
+          git clone --depth 1 --branch v2.1.9 https://github.com/amurcanov/csqtt.git csqtt-2.1.9
+          test -f csqtt-2.1.9/rust-client/Cargo.toml
+          git -C csqtt-2.1.9 rev-parse HEAD
 
       - name: Patch musl UDP and ARM64 compatibility
         working-directory: csqtt-2.1.9/rust-client
