@@ -36,7 +36,7 @@ jobs:
           rustc --version
           cargo --version
           "$ZIG_BIN" version
-          cargo zigbuild --version
+          cargo zigbuild --help >/dev/null
 
       - name: Download CSQTT source 2.1.9
         run: |
