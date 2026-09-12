@@ -46,9 +46,12 @@ jobs:
       - name: Build ARM64 client
         working-directory: csqtt-2.1.9/rust-client
         env:
-          AWS_LC_SYS_CMAKE_BUILDER: '1'
+          AWS_LC_SYS_CMAKE_BUILDER: '0'
           AWS_LC_SYS_STATIC: '1'
           RUST_BACKTRACE: '1'
+          CC_aarch64_unknown_linux_musl: 'zig cc -target aarch64-linux-musl'
+          AR_aarch64_unknown_linux_musl: 'zig ar'
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: 'zig cc'
         run: |
           echo '=== toolchain ==='
           rustc --version
@@ -56,6 +59,8 @@ jobs:
           zig version
           echo '=== target ==='
           rustc --print target-spec-json --target aarch64-unknown-linux-musl 2>/dev/null || true
+          echo '=== cross compiler ==='
+          zig cc -target aarch64-linux-musl --version
           echo '=== cargo build ==='
           cargo zigbuild --release --target aarch64-unknown-linux-musl -vv
           file target/aarch64-unknown-linux-musl/release/client
