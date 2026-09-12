@@ -43,10 +43,31 @@ jobs:
           curl -L --fail -o csqtt.tar.gz https://github.com/amurcanov/csqtt/archive/refs/tags/v2.1.9.tar.gz
           tar -xzf csqtt.tar.gz
 
-      - name: Patch musl UDP compatibility
+      - name: Patch musl UDP and ARM64 compatibility
         working-directory: csqtt-2.1.9/rust-client
         run: |
           set -e
+
+          # zstd-sys 2.0.16+zstd.1.5.7 unconditionally adds the x86-64
+          # huf_decompress_amd64.S unless its no_asm feature is enabled.
+          # That assembly cannot be compiled for aarch64-musl. Make the
+          # feature part of the dependency graph so Cargo enables it for the
+          # transitive zstd-sys used by the CSQTT dependency chain.
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('Cargo.toml')
+          s = p.read_text()
+          dep = 'zstd-sys = { version = "2.0.16", features = ["no_asm"] }'
+          if dep not in s:
+              marker = 'getrandom = "0.4"\n'
+              if marker not in s:
+                  raise SystemExit('Cargo.toml insertion marker not found')
+              s = s.replace(marker, marker + dep + '\n', 1)
+              p.write_text(s)
+          print('=== zstd ARM64 compatibility ===')
+          print(dep)
+          PY
+
           # Be tolerant of either c_int or c_uint in the upstream wrapper.
           sed -i 's/count: libc::c_int/count: libc::c_uint/g' udp_batch.rs
           # Explicitly cast the Linux libc vlen argument to the ABI type.
@@ -56,9 +77,11 @@ jobs:
           # struct-literal construction and initialize the public fields after
           # zeroing the ABI struct.
           perl -0pi -e 's{    fn mmsg_header\(iovec: \*mut libc::iovec\) -> libc::mmsghdr \{\n        libc::mmsghdr \{\n            msg_hdr: libc::msghdr \{\n                msg_name: ptr::null_mut\(\),\n                msg_namelen: 0,\n                msg_iov: iovec,\n                msg_iovlen: 1,\n                msg_control: ptr::null_mut\(\),\n                msg_controllen: 0,\n                msg_flags: 0,\n            \},\n            msg_len: 0,\n        \}\n    \}}{    fn mmsg_header(iovec: *mut libc::iovec) -> libc::mmsghdr {\n        let mut msg_hdr: libc::msghdr = unsafe { std::mem::zeroed() };\n        msg_hdr.msg_name = ptr::null_mut();\n        msg_hdr.msg_namelen = 0;\n        msg_hdr.msg_iov = iovec;\n        msg_hdr.msg_iovlen = 1;\n        msg_hdr.msg_control = ptr::null_mut();\n        msg_hdr.msg_controllen = 0;\n        msg_hdr.msg_flags = 0;\n        libc::mmsghdr {\n            msg_hdr,\n            msg_len: 0,\n        }\n    }}' udp_batch.rs
+
           echo '=== compatibility patch check ==='
           grep -n -A8 'unsafe fn recv_mmsg\|unsafe fn send_mmsg' udp_batch.rs
           grep -n -A14 'fn mmsg_header' udp_batch.rs
+          grep -n 'zstd-sys' Cargo.toml
 
       - name: Build ARM64 client
         working-directory: csqtt-2.1.9/rust-client
