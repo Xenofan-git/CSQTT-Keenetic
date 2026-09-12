@@ -111,7 +111,10 @@ jobs:
                 ;;
             esac
           done
-          exec zig cc -target aarch64-linux-musl "${args[@]}"
+          # Rust's musl target supplies its own crt1/crti/crtbegin/crtend/crtn.
+          # Prevent Zig from adding a second startup set while retaining its
+          # aarch64-musl sysroot and explicit -lc/-lunwind supplied by rustc.
+          exec zig cc -target aarch64-linux-musl -nostdlib "${args[@]}"
           EOF
           chmod +x "$RUNNER_TEMP/zig-cc-aarch64-musl"
           echo '=== Zig ARM64 wrapper ==='
