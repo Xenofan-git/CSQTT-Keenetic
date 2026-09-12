@@ -60,17 +60,11 @@ jobs:
                   raise SystemExit('Cargo.toml insertion marker not found')
               s = s.replace(marker, marker + dep + '\n', 1)
               p.write_text(s)
-          print('=== zstd ARM64 compatibility ===')
-          print(dep)
           PY
           sed -i 's/count: libc::c_int/count: libc::c_uint/g' udp_batch.rs
           sed -i 's/libc::recvmmsg(fd, messages, count, flags, timeout)/libc::recvmmsg(fd, messages, count as libc::c_uint, flags as libc::c_uint, timeout)/g' udp_batch.rs
           sed -i 's/libc::sendmmsg(fd, messages, count, flags)/libc::sendmmsg(fd, messages, count as libc::c_uint, flags as libc::c_uint)/g' udp_batch.rs
-          perl -0pi -e 's{    fn mmsg_header\(iovec: \*mut libc::iovec\) -> libc::mmsghdr \{\n        libc::mmsghdr \{\n            msg_hdr: libc::msghdr \{\n                msg_name: ptr::null_mut\(\),\n                msg_namelen: 0,\n                msg_iov: iovec,\n                msg_iovlen: 1,\n                msg_control: ptr::null_mut\(\),\n                msg_controllen: 0,\n                msg_flags: 0,\n            \},\n            msg_len: 0,\n        \}\n    \}}{    fn mmsg_header(iovec: *mut libc::iovec) -> libc::mmsghdr {\n        let mut msg_hdr: libc::msghdr = unsafe { std::mem::zeroed() };\n        msg_hdr.msg_name = ptr::null_mut();\n        msg_hdr.msg_namelen = 0;\n        msg_hdr.msg_iov = iovec;\n        msg_hdr.msg_iovlen = 1;\n        msg_hdr.msg_control = ptr::null_mut();\n        msg_hdr.msg_controllen = 0;\n        msg_hdr.msg_flags = 0;\n        libc::mmsghdr {\n            msg_hdr,\n            msg_len: 0,\n        }\n    }}' udp_batch.rs
-          echo '=== compatibility patch check ==='
-          grep -n -A8 'unsafe fn recv_mmsg\|unsafe fn send_mmsg' udp_batch.rs
-          grep -n -A14 'fn mmsg_header' udp_batch.rs
-          grep -n 'zstd-sys' Cargo.toml
+          perl -0pi -e 's{    fn mmsg_header\(iovec: \*mut libc::iovec\) -> libc::mmsghdr \{\n        libc::mmsghdr \{\n            msg_hdr: libc::msghdr \{\n                msg_name: ptr::null_mut\(\),\n                msg_namelen: 0,\n                msg_iov: iovec,\n                msg_iovlen: 1,\n                msg_control: ptr::null_mut\(\),\n                msg_controllen: 0,\n                msg_flags: 0,\n            \},\n            msg_len: 0,\n        \}\n    \}}{    fn mmsg_header(iovec: *mut libc::iovec) -> libc::mmsghdr {\n        let mut msg_hdr: libc::msghdr = unsafe { std::mem::zeroed() };\n        msg_hdr.msg_name = ptr::null_mut();\n        msg_hdr.msg_namelen = 0;\n        msg_hdr.msg_iov = iovec;\n        msg_hdr.msg_iovlen = 1;\n        msg_hdr.msg_control = ptr::null_mut();\n        msg_hdr.msg_controllen = 0;\n        msg_hdr.msg_flags = 0;\n        libc::mmsghdr { msg_hdr, msg_len: 0 }\n    }}' udp_batch.rs
 
       - name: Build ARM64 client
         working-directory: csqtt-2.1.9/rust-client
@@ -84,52 +78,29 @@ jobs:
           cat > "$RUNNER_TEMP/zig-cc-aarch64-musl" <<'EOF'
           #!/usr/bin/env bash
           set -euo pipefail
-
           args=()
           skip_next=0
           compile=0
-
           for arg in "$@"; do
-            if [[ "$skip_next" -eq 1 ]]; then
-              skip_next=0
-              continue
-            fi
-
+            if [[ "$skip_next" -eq 1 ]]; then skip_next=0; continue; fi
             case "$arg" in
-              --target|-target)
-                skip_next=1
-                continue
-                ;;
-              --target=*|-target=*)
-                continue
-                ;;
-              -Wl,--fix-cortex-a53-843419)
-                continue
-                ;;
-              -c)
-                compile=1
-                args+=("$arg")
-                ;;
-              *)
-                args+=("$arg")
-                ;;
+              --target|-target) skip_next=1; continue ;;
+              --target=*|-target=*) continue ;;
+              -Wl,--fix-cortex-a53-843419) continue ;;
+              -c) compile=1; args+=("$arg") ;;
+              *) args+=("$arg") ;;
             esac
           done
-
           echo "[zig-wrapper] mode=$([[ "$compile" -eq 1 ]] && echo compile || echo link)" >&2
-          echo "[zig-wrapper] args=${args[*]}" >&2
-
           if [[ "$compile" -eq 1 ]]; then
             exec zig cc -target aarch64-linux-musl "${args[@]}"
           else
-            # rustc's musl target is self-contained and supplies its own
-            # startup objects. Zig must therefore not add another crt1/crti
-            # set, but we still need Zig's musl libc/libgcc runtime libraries.
-            exec zig cc -target aarch64-linux-musl -nostartfiles "${args[@]}"
+            # rustc supplies crt1/crti/crtbegin/crtend/crtn itself.
+            # Do not let Zig inject a second musl startup set (_start).
+            exec zig cc -target aarch64-linux-musl -nostdlib "${args[@]}"
           fi
           EOF
           chmod +x "$RUNNER_TEMP/zig-cc-aarch64-musl"
-
           echo '=== Zig ARM64 wrapper ==='
           cat "$RUNNER_TEMP/zig-cc-aarch64-musl"
           echo '=== toolchain ==='
