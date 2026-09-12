@@ -16,7 +16,7 @@ jobs:
       - name: Install native build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y nasm cmake
+          sudo apt-get install -y nasm cmake clang
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -46,10 +46,21 @@ jobs:
       - name: Build ARM64 client
         working-directory: csqtt-2.1.9/rust-client
         env:
-          RUSTFLAGS: '-C target-feature=+crt-static'
+          AWS_LC_SYS_CMAKE_BUILDER: '1'
+          AWS_LC_SYS_STATIC: '1'
+          RUST_BACKTRACE: '1'
         run: |
+          echo '=== toolchain ==='
+          rustc --version
+          cargo --version
+          zig version
+          echo '=== target ==='
+          rustc --print target-spec-json --target aarch64-unknown-linux-musl 2>/dev/null || true
+          echo '=== cargo build ==='
           cargo zigbuild --release --target aarch64-unknown-linux-musl -vv
           file target/aarch64-unknown-linux-musl/release/client
+          readelf -h target/aarch64-unknown-linux-musl/release/client
+          readelf -d target/aarch64-unknown-linux-musl/release/client || true
           sha256sum target/aarch64-unknown-linux-musl/release/client
 
       - name: Package
