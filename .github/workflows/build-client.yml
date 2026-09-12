@@ -29,8 +29,6 @@ jobs:
           python3 -m pip install --upgrade pip
           python3 -m pip install --user ziglang
           ZIG_BIN="$(python3 -c 'import os, ziglang; print(os.path.join(os.path.dirname(ziglang.__file__), "zig"))')"
-          echo "ZIG_BIN=$ZIG_BIN"
-          test -x "$ZIG_BIN"
           echo "$(dirname "$ZIG_BIN")" >> "$GITHUB_PATH"
           cargo install cargo-zigbuild --locked
           rustc --version
@@ -95,25 +93,18 @@ jobs:
           if [[ "$compile" -eq 1 ]]; then
             exec zig cc -target aarch64-linux-musl "${args[@]}"
           else
-            # rustc supplies crt1/crti/crtbegin/crtend/crtn itself.
-            # Do not let Zig inject a second musl startup set (_start).
+            # Rust supplies the complete self-contained musl CRT set.
+            # Zig must not inject its own crt1/crti/crtbegin objects.
             exec zig cc -target aarch64-linux-musl -nostdlib "${args[@]}"
           fi
           EOF
           chmod +x "$RUNNER_TEMP/zig-cc-aarch64-musl"
           echo '=== Zig ARM64 wrapper ==='
           cat "$RUNNER_TEMP/zig-cc-aarch64-musl"
-          echo '=== toolchain ==='
           rustc --version
           cargo --version
           zig version
-          echo '=== target ==='
-          rustc --print target-spec-json --target aarch64-unknown-linux-musl 2>/dev/null || true
-          echo '=== cross compiler ==='
           "$RUNNER_TEMP/zig-cc-aarch64-musl" --version
-          echo '=== AWS-LC cross environment ==='
-          echo "AWS_LC_SYS_CFLAGS_aarch64_unknown_linux_musl=$AWS_LC_SYS_CFLAGS_aarch64_unknown_linux_musl"
-          echo '=== cargo build ==='
           CC_aarch64_unknown_linux_musl="$RUNNER_TEMP/zig-cc-aarch64-musl" \
           AR_aarch64_unknown_linux_musl='zig ar' \
           AWS_LC_SYS_CC="$RUNNER_TEMP/zig-cc-aarch64-musl" \
