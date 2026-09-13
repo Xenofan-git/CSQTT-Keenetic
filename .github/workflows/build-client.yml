@@ -5,6 +5,7 @@ on:
   push:
     paths:
       - '.github/workflows/build-client.yml'
+      - 'patches/csqtt-core/rust-client/tun.rs'
 
 jobs:
   build:
@@ -45,6 +46,15 @@ jobs:
           test -f csqtt-2.1.9/rust-client/Cargo.toml
           git -C csqtt-2.1.9 rev-parse HEAD
 
+      - name: Apply Linux UDS SCM_RIGHTS TUN receiver
+        run: |
+          set -euo pipefail
+          test -f patches/csqtt-core/rust-client/tun.rs
+          cp patches/csqtt-core/rust-client/tun.rs csqtt-2.1.9/rust-client/tun.rs
+          grep -q 'SCM_RIGHTS' csqtt-2.1.9/rust-client/tun.rs
+          grep -q 'accept4' csqtt-2.1.9/rust-client/tun.rs
+          grep -q 'SOCK_NONBLOCK' csqtt-2.1.9/rust-client/tun.rs
+
       - name: Patch musl UDP and ARM64 compatibility
         working-directory: csqtt-2.1.9/rust-client
         run: |
@@ -78,59 +88,29 @@ jobs:
           cat > "$RUNNER_TEMP/zig-cc-aarch64-musl" <<'EOF'
           #!/usr/bin/env bash
           set -euo pipefail
-
           args=()
           skip_next=0
           compile=0
-
           for arg in "$@"; do
-            if [[ "$skip_next" -eq 1 ]]; then
-              skip_next=0
-              continue
-            fi
+            if [[ "$skip_next" -eq 1 ]]; then skip_next=0; continue; fi
             case "$arg" in
-              --target|-target)
-                skip_next=1
-                continue
-                ;;
-              --target=*|-target=*)
-                continue
-                ;;
-              -Wl,--fix-cortex-a53-843419)
-                continue
-                ;;
-              # Rust's aarch64-musl target passes its own CRT objects.
-              # Zig also injects musl CRT objects, causing duplicate _start.
-              # Drop Rust's self-contained startup objects and let Zig provide
-              # the complete musl startup set consistently.
+              --target|-target) skip_next=1; continue ;;
+              --target=*|-target=*) continue ;;
+              -Wl,--fix-cortex-a53-843419) continue ;;
               */rustlib/aarch64-unknown-linux-musl/lib/self-contained/crt1.o|\
               */rustlib/aarch64-unknown-linux-musl/lib/self-contained/crti.o|\
               */rustlib/aarch64-unknown-linux-musl/lib/self-contained/crtbegin.o|\
               */rustlib/aarch64-unknown-linux-musl/lib/self-contained/crtend.o|\
-              */rustlib/aarch64-unknown-linux-musl/lib/self-contained/crtn.o)
-                continue
-                ;;
-              -c)
-                compile=1
-                args+=("$arg")
-                ;;
-              *)
-                args+=("$arg")
-                ;;
+              */rustlib/aarch64-unknown-linux-musl/lib/self-contained/crtn.o) continue ;;
+              -c) compile=1; args+=("$arg") ;;
+              *) args+=("$arg") ;;
             esac
           done
-
           echo "[zig-wrapper] mode=$([[ "$compile" -eq 1 ]] && echo compile || echo link)" >&2
           echo "[zig-wrapper] args=${args[*]}" >&2
-
-          # For compilation Zig is the C/assembly cross compiler.
-          # For final linking Zig supplies its own musl CRT; Rust's duplicate
-          # CRT objects were removed above. Keep Rust's -nodefaultlibs so that
-          # the libraries explicitly requested by rustc remain authoritative.
           exec zig cc -target aarch64-linux-musl "${args[@]}"
           EOF
           chmod +x "$RUNNER_TEMP/zig-cc-aarch64-musl"
-
           echo '=== Zig ARM64 wrapper ==='
           cat "$RUNNER_TEMP/zig-cc-aarch64-musl"
           echo '=== toolchain ==='
