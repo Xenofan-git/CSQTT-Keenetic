@@ -71,3 +71,5 @@ jobs:
         with:
           name: CSQTT-client-2.1.9-aarch64-k3.10
           path: CSQTT-client-2.1.9-aarch64-k3.10.tar.gz
+
+      # Manual dispatch remains available for mobile GitHub UI recovery.
