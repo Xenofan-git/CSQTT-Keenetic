@@ -28,13 +28,23 @@ jobs:
       - name: Install Zig and cargo-zigbuild
         run: |
           python3 -m pip install --upgrade pip
-          pip install ziglang cargo-zigbuild
+          python3 -m pip install --user ziglang
+          ZIG_BIN="$(python3 -c 'import os, ziglang; print(os.path.join(os.path.dirname(ziglang.__file__), "zig"))')"
+          echo "ZIG_BIN=$ZIG_BIN"
+          test -x "$ZIG_BIN"
+          echo "$(dirname "$ZIG_BIN")" >> "$GITHUB_PATH"
+          cargo install cargo-zigbuild --locked
+          rustc --version
+          cargo --version
+          "$ZIG_BIN" version
+          cargo zigbuild --help >/dev/null
 
-      # Trigger a fresh ARM64 build after the Linux UDS SCM_RIGHTS fix.
       - name: Download CSQTT source 2.1.9
         run: |
           set -euo pipefail
           git clone --depth 1 --branch v2.1.9 https://github.com/amurcanov/csqtt.git csqtt-2.1.9
+          test -f csqtt-2.1.9/rust-client/Cargo.toml
+          git -C csqtt-2.1.9 rev-parse HEAD
 
       - name: Apply Linux UDS SCM_RIGHTS TUN receiver
         run: |
@@ -46,31 +56,119 @@ jobs:
           grep -q 'SOCK_NONBLOCK' csqtt-2.1.9/rust-client/tun.rs
 
       - name: Patch musl UDP and ARM64 compatibility
+        working-directory: csqtt-2.1.9/rust-client
         run: |
-          set -euo pipefail
+          set -e
           python3 - <<'PY'
           from pathlib import Path
-          p = Path('csqtt-2.1.9/rust-client/udp.rs')
+          p = Path('Cargo.toml')
           s = p.read_text()
-          s = s.replace('std::mem::size_of::<libc::msghdr>()', 'std::mem::size_of::<libc::msghdr>()')
-          p.write_text(s)
+          dep = 'zstd-sys = { version = "2.0.16", features = ["no_asm"] }'
+          if dep not in s:
+              marker = 'getrandom = "0.4"\n'
+              if marker not in s:
+                  raise SystemExit('Cargo.toml insertion marker not found')
+              s = s.replace(marker, marker + dep + '\n', 1)
+              p.write_text(s)
           PY
+          sed -i 's/count: libc::c_int/count: libc::c_uint/g' udp_batch.rs
+          sed -i 's/libc::recvmmsg(fd, messages, count, flags, timeout)/libc::recvmmsg(fd, messages, count as libc::c_uint, flags as libc::c_uint, timeout)/g' udp_batch.rs
+          sed -i 's/libc::sendmmsg(fd, messages, count, flags)/libc::sendmmsg(fd, messages, count as libc::c_uint, flags as libc::c_uint)/g' udp_batch.rs
+          perl -0pi -e 's{    fn mmsg_header\(iovec: \*mut libc::iovec\) -> libc::mmsghdr \{\n        libc::mmsghdr \{\n            msg_hdr: libc::msghdr \{\n                msg_name: ptr::null_mut\(\),\n                msg_namelen: 0,\n                msg_iov: iovec,\n                msg_iovlen: 1,\n                msg_control: ptr::null_mut\(\),\n                msg_controllen: 0,\n                msg_flags: 0,\n            \},\n            msg_len: 0,\n        \}\n    \}}{    fn mmsg_header(iovec: *mut libc::iovec) -> libc::mmsghdr {\n        let mut msg_hdr: libc::msghdr = unsafe { std::mem::zeroed() };\n        msg_hdr.msg_name = ptr::null_mut();\n        msg_hdr.msg_namelen = 0;\n        msg_hdr.msg_iov = iovec;\n        msg_hdr.msg_iovlen = 1;\n        msg_hdr.msg_control = ptr::null_mut();\n        msg_hdr.msg_controllen = 0;\n        msg_hdr.msg_flags = 0;\n        libc::mmsghdr { msg_hdr, msg_len: 0 }\n    }}' udp_batch.rs
 
       - name: Build ARM64 client
-        working-directory: csqtt-2.1.9
+        working-directory: csqtt-2.1.9/rust-client
+        env:
+          AWS_LC_SYS_CMAKE_BUILDER: '0'
+          AWS_LC_SYS_STATIC: '1'
+          AWS_LC_SYS_CFLAGS_aarch64_unknown_linux_musl: '-D__ARM_ARCH=8'
+          RUST_BACKTRACE: '1'
         run: |
-          cargo zigbuild --release --target aarch64-unknown-linux-musl
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/zig-cc-aarch64-musl" <<'EOF'
+          #!/usr/bin/env bash
+          set -euo pipefail
 
-      - name: Package ARM64 client
+          args=()
+          skip_next=0
+          compile=0
+
+          for arg in "$@"; do
+            if [[ "$skip_next" -eq 1 ]]; then
+              skip_next=0
+              continue
+            fi
+            case "$arg" in
+              --target|-target)
+                skip_next=1
+                continue
+                ;;
+              --target=*|-target=*)
+                continue
+                ;;
+              -Wl,--fix-cortex-a53-843419)
+                continue
+                ;;
+              */rustlib/aarch64-unknown-linux-musl/lib/self-contained/crt1.o|\
+              */rustlib/aarch64-unknown-linux-musl/lib/self-contained/crti.o|\
+              */rustlib/aarch64-unknown-linux-musl/lib/self-contained/crtbegin.o|\
+              */rustlib/aarch64-unknown-linux-musl/lib/self-contained/crtend.o|\
+              */rustlib/aarch64-unknown-linux-musl/lib/self-contained/crtn.o)
+                continue
+                ;;
+              -c)
+                compile=1
+                args+=("$arg")
+                ;;
+              *)
+                args+=("$arg")
+                ;;
+            esac
+          done
+
+          echo "[zig-wrapper] mode=$([[ "$compile" -eq 1 ]] && echo compile || echo link)" >&2
+          echo "[zig-wrapper] args=${args[*]}" >&2
+          exec zig cc -target aarch64-linux-musl "${args[@]}"
+          EOF
+          chmod +x "$RUNNER_TEMP/zig-cc-aarch64-musl"
+
+          echo '=== Zig ARM64 wrapper ==='
+          cat "$RUNNER_TEMP/zig-cc-aarch64-musl"
+          echo '=== toolchain ==='
+          rustc --version
+          cargo --version
+          zig version
+          echo '=== target ==='
+          rustc --print target-spec-json --target aarch64-unknown-linux-musl 2>/dev/null || true
+          echo '=== cross compiler ==='
+          "$RUNNER_TEMP/zig-cc-aarch64-musl" --version
+          echo '=== AWS-LC cross environment ==='
+          echo "AWS_LC_SYS_CFLAGS_aarch64_unknown_linux_musl=$AWS_LC_SYS_CFLAGS_aarch64_unknown_linux_musl"
+          echo '=== cargo build ==='
+          CC_aarch64_unknown_linux_musl="$RUNNER_TEMP/zig-cc-aarch64-musl" \
+          AR_aarch64_unknown_linux_musl='zig ar' \
+          AWS_LC_SYS_CC="$RUNNER_TEMP/zig-cc-aarch64-musl" \
+          AWS_LC_SYS_TARGET_CC="$RUNNER_TEMP/zig-cc-aarch64-musl" \
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER="$RUNNER_TEMP/zig-cc-aarch64-musl" \
+          cargo zigbuild --release --target aarch64-unknown-linux-musl -vv
+          file target/aarch64-unknown-linux-musl/release/client
+          readelf -h target/aarch64-unknown-linux-musl/release/client
+          readelf -d target/aarch64-unknown-linux-musl/release/client || true
+          sha256sum target/aarch64-unknown-linux-musl/release/client
+
+      - name: Package
         run: |
           mkdir -p dist
-          cp csqtt-2.1.9/target/aarch64-unknown-linux-musl/release/client dist/client
+          cp csqtt-2.1.9/rust-client/target/aarch64-unknown-linux-musl/release/client dist/client
+          chmod 755 dist/client
           tar -C dist -czf CSQTT-client-2.1.9-aarch64-k3.10.tar.gz client
+          sha256sum dist/client CSQTT-client-2.1.9-aarch64-k3.10.tar.gz | tee SHA256SUMS
 
-      - name: Upload ARM64 artifact
+      - name: Upload client artifact
         uses: actions/upload-artifact@v4
         with:
           name: CSQTT-client-2.1.9-aarch64-k3.10
-          path: CSQTT-client-2.1.9-aarch64-k3.10.tar.gz
-
-      # Manual dispatch remains available for mobile GitHub UI recovery.
+          path: |
+            dist/client
+            CSQTT-client-2.1.9-aarch64-k3.10.tar.gz
+            SHA256SUMS
