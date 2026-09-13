@@ -33,37 +33,38 @@ jobs:
       # Trigger a fresh ARM64 build after the Linux UDS SCM_RIGHTS fix.
       - name: Download CSQTT source 2.1.9
         run: |
-          git clone --depth 1 --branch v2.1.9 https://github.com/amurcanov/csqтt.git csqтt-2.1.9
+          set -euo pipefail
+          git clone --depth 1 --branch v2.1.9 https://github.com/amurcanov/csqtt.git csqtt-2.1.9
 
       - name: Apply Linux UDS SCM_RIGHTS TUN receiver
         run: |
           set -euo pipefail
           test -f patches/csqтt-core/rust-client/tun.rs
-          cp patches/csqтt-core/rust-client/tun.rs csqтt-2.1.9/rust-client/tun.rs
-          grep -q 'SCM_RIGHTS' csqтt-2.1.9/rust-client/tun.rs
-          grep -q 'accept4' csqтt-2.1.9/rust-client/tun.rs
-          grep -q 'SOCK_NONBLOCK' csqтt-2.1.9/rust-client/tun.rs
+          cp patches/csqтt-core/rust-client/tun.rs csqtt-2.1.9/rust-client/tun.rs
+          grep -q 'SCM_RIGHTS' csqtt-2.1.9/rust-client/tun.rs
+          grep -q 'accept4' csqtt-2.1.9/rust-client/tun.rs
+          grep -q 'SOCK_NONBLOCK' csqtt-2.1.9/rust-client/tun.rs
 
       - name: Patch musl UDP and ARM64 compatibility
         run: |
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
-          p = Path('csqтt-2.1.9/rust-client/udp.rs')
+          p = Path('csqtt-2.1.9/rust-client/udp.rs')
           s = p.read_text()
           s = s.replace('std::mem::size_of::<libc::msghdr>()', 'std::mem::size_of::<libc::msghdr>()')
           p.write_text(s)
           PY
 
       - name: Build ARM64 client
-        working-directory: csqтt-2.1.9
+        working-directory: csqtt-2.1.9
         run: |
           cargo zigbuild --release --target aarch64-unknown-linux-musl
 
       - name: Package ARM64 client
         run: |
           mkdir -p dist
-          cp csqтt-2.1.9/target/aarch64-unknown-linux-musl/release/client dist/client
+          cp csqtt-2.1.9/target/aarch64-unknown-linux-musl/release/client dist/client
           tar -C dist -czf CSQTT-client-2.1.9-aarch64-k3.10.tar.gz client
 
       - name: Upload ARM64 artifact
