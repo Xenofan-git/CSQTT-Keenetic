@@ -1,0 +1,49 @@
+name: Build CSQTT-Keenetic Manager ARM64
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'main.go'
+      - 'go.mod'
+      - '.github/workflows/build-manager.yml'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.2'
+
+      - name: Build ARM64 manager
+        env:
+          CGO_ENABLED: '0'
+          GOOS: linux
+          GOARCH: arm64
+        run: |
+          set -euo pipefail
+          gofmt -w main.go
+          go vet ./...
+          go build -trimpath -ldflags='-s -w' -o CSQTT-Keenetic main.go
+          file CSQTT-Keenetic
+          sha256sum CSQTT-Keenetic
+
+      - name: Package
+        run: |
+          set -euo pipefail
+          tar -czf CSQTT-Keenetic-arm64.tar.gz CSQTT-Keenetic
+          sha256sum CSQTT-Keenetic-arm64.tar.gz | tee SHA256SUMS
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: CSQTT-Keenetic-manager-arm64
+          path: |
+            CSQTT-Keenetic
+            CSQTT-Keenetic-arm64.tar.gz
+            SHA256SUMS
