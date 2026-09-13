@@ -88,50 +88,29 @@ jobs:
           cat > "$RUNNER_TEMP/zig-cc-aarch64-musl" <<'EOF'
           #!/usr/bin/env bash
           set -euo pipefail
-
           args=()
           skip_next=0
           compile=0
-
           for arg in "$@"; do
-            if [[ "$skip_next" -eq 1 ]]; then
-              skip_next=0
-              continue
-            fi
+            if [[ "$skip_next" -eq 1 ]]; then skip_next=0; continue; fi
             case "$arg" in
-              --target|-target)
-                skip_next=1
-                continue
-                ;;
-              --target=*|-target=*)
-                continue
-                ;;
-              -Wl,--fix-cortex-a53-843419)
-                continue
-                ;;
+              --target|-target) skip_next=1; continue ;;
+              --target=*|-target=*) continue ;;
+              -Wl,--fix-cortex-a53-843419) continue ;;
               */rustlib/aarch64-unknown-linux-musl/lib/self-contained/crt1.o|\
               */rustlib/aarch64-unknown-linux-musl/lib/self-contained/crti.o|\
               */rustlib/aarch64-unknown-linux-musl/lib/self-contained/crtbegin.o|\
               */rustlib/aarch64-unknown-linux-musl/lib/self-contained/crtend.o|\
-              */rustlib/aarch64-unknown-linux-musl/lib/self-contained/crtn.o)
-                continue
-                ;;
-              -c)
-                compile=1
-                args+=("$arg")
-                ;;
-              *)
-                args+=("$arg")
-                ;;
+              */rustlib/aarch64-unknown-linux-musl/lib/self-contained/crtn.o) continue ;;
+              -c) compile=1; args+=("$arg") ;;
+              *) args+=("$arg") ;;
             esac
           done
-
           echo "[zig-wrapper] mode=$([[ "$compile" -eq 1 ]] && echo compile || echo link)" >&2
           echo "[zig-wrapper] args=${args[*]}" >&2
           exec zig cc -target aarch64-linux-musl "${args[@]}"
           EOF
           chmod +x "$RUNNER_TEMP/zig-cc-aarch64-musl"
-
           echo '=== Zig ARM64 wrapper ==='
           cat "$RUNNER_TEMP/zig-cc-aarch64-musl"
           echo '=== toolchain ==='
@@ -172,3 +151,5 @@ jobs:
             dist/client
             CSQTT-client-2.1.9-aarch64-k3.10.tar.gz
             SHA256SUMS
+
+# Trigger a fresh ARM64 build after restoring the known-good cross-build compatibility patches.
