@@ -16,41 +16,22 @@ mod linux {
     const UNIX_PATH_MAX: usize = 108;
     const CONTROL_LEN: usize = 64;
 
-    pub struct FdReceiver {
-        listener: AsyncFd<OwnedFd>,
-    }
+    pub struct FdReceiver { listener: AsyncFd<OwnedFd> }
 
     impl FdReceiver {
         pub fn bind(name: &str) -> Result<Self> {
             let name = name.strip_prefix('@').unwrap_or(name);
             if name.is_empty() { bail!("TUN UDS name is empty"); }
             if name.len() + 1 > UNIX_PATH_MAX { bail!("TUN UDS name is too long: {} bytes", name.len()); }
-
-            let fd = unsafe {
-                libc::socket(
-                    libc::AF_UNIX,
-                    libc::SOCK_STREAM | libc::SOCK_NONBLOCK | libc::SOCK_CLOEXEC,
-                    0,
-                )
-            };
+            let fd = unsafe { libc::socket(libc::AF_UNIX, libc::SOCK_STREAM | libc::SOCK_NONBLOCK | libc::SOCK_CLOEXEC, 0) };
             if fd < 0 { return Err(io::Error::last_os_error().into()); }
-
             let fd = unsafe { OwnedFd::from_raw_fd(fd) };
             let addr = make_abstract_addr(name)?;
             let addr_len = abstract_addr_len(name.len());
-
-            let rc = unsafe {
-                libc::bind(
-                    fd.as_raw_fd(),
-                    (&addr as *const libc::sockaddr_un).cast::<libc::sockaddr>(),
-                    addr_len,
-                )
-            };
+            let rc = unsafe { libc::bind(fd.as_raw_fd(), (&addr as *const libc::sockaddr_un).cast::<libc::sockaddr>(), addr_len) };
             if rc < 0 { return Err(io::Error::last_os_error().into()); }
-
             let rc = unsafe { libc::listen(fd.as_raw_fd(), 4) };
             if rc < 0 { return Err(io::Error::last_os_error().into()); }
-
             let listener = AsyncFd::new(fd)?;
             crate::log_error!("[TUN] UDS listener ready: @{name}");
             Ok(Self { listener })
@@ -62,29 +43,14 @@ mod linux {
                     _ = cancel.cancelled() => bail!("TUN FD receiver cancelled"),
                     ready = self.listener.readable() => ready?,
                 };
-
                 loop {
                     match accept_nonblocking(self.listener.get_ref().as_raw_fd()) {
-                        Ok(client_fd) => {
-                            match recv_tun_fd(client_fd, cancel).await {
-                                Ok(file) => {
-                                    guard.clear_ready();
-                                    return Ok(file);
-                                }
-                                Err(error) => {
-                                    crate::log_error!("[TUN] Invalid UDS FD transfer: {error}");
-                                    continue;
-                                }
-                            }
-                        }
-                        Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
-                            guard.clear_ready();
-                            break;
-                        }
-                        Err(error) => {
-                            guard.clear_ready();
-                            return Err(error.into());
-                        }
+                        Ok(client_fd) => match recv_tun_fd(client_fd, cancel).await {
+                            Ok(file) => { guard.clear_ready(); return Ok(file); }
+                            Err(error) => { crate::log_error!("[TUN] Invalid UDS FD transfer: {error}"); continue; }
+                        },
+                        Err(error) if error.kind() == io::ErrorKind::WouldBlock => { guard.clear_ready(); break; }
+                        Err(error) => { guard.clear_ready(); return Err(error.into()); }
                     }
                 }
             }
@@ -101,14 +67,10 @@ mod linux {
         Ok(addr)
     }
 
-    fn abstract_addr_len(name_len: usize) -> libc::socklen_t {
-        (size_of::<libc::sa_family_t>() + 1 + name_len) as libc::socklen_t
-    }
+    fn abstract_addr_len(name_len: usize) -> libc::socklen_t { (size_of::<libc::sa_family_t>() + 1 + name_len) as libc::socklen_t }
 
     fn accept_nonblocking(listener: RawFd) -> io::Result<OwnedFd> {
-        let fd = unsafe {
-            libc::accept4(listener, std::ptr::null_mut(), std::ptr::null_mut(), libc::SOCK_NONBLOCK | libc::SOCK_CLOEXEC)
-        };
+        let fd = unsafe { libc::accept4(listener, std::ptr::null_mut(), std::ptr::null_mut(), libc::SOCK_NONBLOCK | libc::SOCK_CLOEXEC) };
         if fd < 0 { Err(io::Error::last_os_error()) } else { Ok(unsafe { OwnedFd::from_raw_fd(fd) }) }
     }
 
@@ -119,13 +81,8 @@ mod linux {
                 _ = cancel.cancelled() => bail!("TUN FD ACK cancelled"),
                 ready = socket.writable() => ready?,
             };
-            let n = unsafe {
-                libc::send(socket.get_ref().as_raw_fd(), ack.as_ptr().cast(), 1, libc::MSG_NOSIGNAL)
-            };
-            if n == 1 {
-                guard.clear_ready();
-                return Ok(());
-            }
+            let n = unsafe { libc::send(socket.get_ref().as_raw_fd(), ack.as_ptr().cast(), 1, libc::MSG_NOSIGNAL) };
+            if n == 1 { guard.clear_ready(); return Ok(()); }
             guard.clear_ready();
             if n < 0 {
                 let error = io::Error::last_os_error();
@@ -140,20 +97,17 @@ mod linux {
         let socket = AsyncFd::new(fd)?;
         let mut payload = [0u8; 1];
         let mut control = [0usize; CONTROL_LEN / size_of::<usize>()];
-
         loop {
             let mut guard = tokio::select! {
                 _ = cancel.cancelled() => bail!("TUN FD transfer cancelled"),
                 ready = socket.readable() => ready?,
             };
-
             let mut iov = libc::iovec { iov_base: payload.as_mut_ptr().cast(), iov_len: payload.len() };
             let mut msg: libc::msghdr = unsafe { zeroed() };
             msg.msg_iov = &mut iov;
             msg.msg_iovlen = 1;
             msg.msg_control = control.as_mut_ptr().cast();
             msg.msg_controllen = std::mem::size_of_val(&control) as libc::socklen_t;
-
             let n = unsafe { libc::recvmsg(socket.get_ref().as_raw_fd(), &mut msg, 0) };
             if n < 0 {
                 let error = io::Error::last_os_error();
@@ -163,7 +117,6 @@ mod linux {
             }
             if n == 0 { guard.clear_ready(); return Err(anyhow::anyhow!("UDS peer closed before sending TUN FD")); }
             if (msg.msg_flags & libc::MSG_CTRUNC) != 0 { guard.clear_ready(); return Err(anyhow::anyhow!("UDS SCM_RIGHTS control data was truncated")); }
-
             let mut cursor = control.as_ptr().cast::<u8>();
             let end = unsafe { cursor.add(msg.msg_controllen as usize) };
             while (cursor as usize) + size_of::<libc::cmsghdr>() <= end as usize {
@@ -203,3 +156,11 @@ impl FdReceiver {
 }
 
 #[cfg(test)]
+mod tests {
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn abstract_addr_length_is_correct() {
+        assert_eq!(super::linux::abstract_addr_len(0), 3);
+        assert_eq!(super::linux::abstract_addr_len(14), 17);
+    }
+}
