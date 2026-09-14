@@ -82,8 +82,8 @@ mod linux {
                 ready = socket.writable() => ready?,
             };
             let n = unsafe { libc::send(socket.get_ref().as_raw_fd(), ack.as_ptr().cast(), 1, libc::MSG_NOSIGNAL) };
-            if n == 1 { guard.clear_ready(); return Ok(()); }
             guard.clear_ready();
+            if n == 1 { return Ok(()); }
             if n < 0 {
                 let error = io::Error::last_os_error();
                 if error.kind() == io::ErrorKind::WouldBlock { continue; }
@@ -102,43 +102,53 @@ mod linux {
                 _ = cancel.cancelled() => bail!("TUN FD transfer cancelled"),
                 ready = socket.readable() => ready?,
             };
-            let mut iov = libc::iovec { iov_base: payload.as_mut_ptr().cast(), iov_len: payload.len() };
-            let mut msg: libc::msghdr = unsafe { zeroed() };
-            msg.msg_iov = &mut iov;
-            msg.msg_iovlen = 1;
-            msg.msg_control = control.as_mut_ptr().cast();
-            msg.msg_controllen = std::mem::size_of_val(&control) as libc::socklen_t;
-            let n = unsafe { libc::recvmsg(socket.get_ref().as_raw_fd(), &mut msg, 0) };
-            if n < 0 {
-                let error = io::Error::last_os_error();
-                guard.clear_ready();
-                if error.kind() == io::ErrorKind::WouldBlock { continue; }
-                return Err(error.into());
-            }
-            if n == 0 { guard.clear_ready(); return Err(anyhow::anyhow!("UDS peer closed before sending TUN FD")); }
-            if (msg.msg_flags & libc::MSG_CTRUNC) != 0 { guard.clear_ready(); return Err(anyhow::anyhow!("UDS SCM_RIGHTS control data was truncated")); }
-            let mut cursor = control.as_ptr().cast::<u8>();
-            let end = unsafe { cursor.add(msg.msg_controllen as usize) };
-            while (cursor as usize) + size_of::<libc::cmsghdr>() <= end as usize {
-                let header = unsafe { &*(cursor.cast::<libc::cmsghdr>()) };
-                if header.cmsg_len < size_of::<libc::cmsghdr>() as u32 { break; }
-                let next = unsafe { libc::CMSG_NXTHDR(&msg, header) };
-                if header.cmsg_level == libc::SOL_SOCKET && header.cmsg_type == libc::SCM_RIGHTS {
-                    let base = unsafe { libc::CMSG_LEN(0) as usize };
-                    let data_len = (header.cmsg_len as usize).saturating_sub(base);
-                    if data_len < size_of::<RawFd>() { guard.clear_ready(); return Err(anyhow::anyhow!("SCM_RIGHTS contains no file descriptor")); }
-                    let fd_ptr = unsafe { libc::CMSG_DATA(header).cast::<RawFd>() };
-                    let received_fd = unsafe { *fd_ptr };
-                    if received_fd < 0 { guard.clear_ready(); return Err(anyhow::anyhow!("SCM_RIGHTS returned invalid FD")); }
-                    let file = unsafe { File::from_raw_fd(received_fd) };
+
+            // Keep all non-Send libc message structures in this scope. They must be
+            // dropped before the ACK await below, otherwise the spawned future is
+            // not Send on musl/aarch64.
+            let received_fd = {
+                let mut iov = libc::iovec { iov_base: payload.as_mut_ptr().cast(), iov_len: payload.len() };
+                let mut msg: libc::msghdr = unsafe { zeroed() };
+                msg.msg_iov = &mut iov;
+                msg.msg_iovlen = 1;
+                msg.msg_control = control.as_mut_ptr().cast();
+                msg.msg_controllen = std::mem::size_of_val(&control) as libc::socklen_t;
+                let n = unsafe { libc::recvmsg(socket.get_ref().as_raw_fd(), &mut msg, 0) };
+                if n < 0 {
+                    let error = io::Error::last_os_error();
                     guard.clear_ready();
-                    send_tun_ack(&socket, cancel).await?;
-                    return Ok(file);
+                    if error.kind() == io::ErrorKind::WouldBlock { continue; }
+                    return Err(error.into());
                 }
-                match next { p if p.is_null() => break, p => cursor = p.cast::<u8>(), }
-            }
+                if n == 0 { guard.clear_ready(); return Err(anyhow::anyhow!("UDS peer closed before sending TUN FD")); }
+                if (msg.msg_flags & libc::MSG_CTRUNC) != 0 { guard.clear_ready(); return Err(anyhow::anyhow!("UDS SCM_RIGHTS control data was truncated")); }
+
+                let mut cursor = control.as_ptr().cast::<u8>();
+                let end = unsafe { cursor.add(msg.msg_controllen as usize) };
+                let mut received_fd = None;
+                while (cursor as usize) + size_of::<libc::cmsghdr>() <= end as usize {
+                    let header = unsafe { &*(cursor.cast::<libc::cmsghdr>()) };
+                    if header.cmsg_len < size_of::<libc::cmsghdr>() as u32 { break; }
+                    let next = unsafe { libc::CMSG_NXTHDR(&msg, header) };
+                    if header.cmsg_level == libc::SOL_SOCKET && header.cmsg_type == libc::SCM_RIGHTS {
+                        let base = unsafe { libc::CMSG_LEN(0) as usize };
+                        let data_len = (header.cmsg_len as usize).saturating_sub(base);
+                        if data_len < size_of::<RawFd>() { guard.clear_ready(); return Err(anyhow::anyhow!("SCM_RIGHTS contains no file descriptor")); }
+                        let fd_ptr = unsafe { libc::CMSG_DATA(header).cast::<RawFd>() };
+                        let fd = unsafe { *fd_ptr };
+                        if fd < 0 { guard.clear_ready(); return Err(anyhow::anyhow!("SCM_RIGHTS returned invalid FD")); }
+                        received_fd = Some(fd);
+                        break;
+                    }
+                    match next { p if p.is_null() => break, p => cursor = p.cast::<u8>(), }
+                }
+                received_fd.ok_or_else(|| anyhow::anyhow!("UDS message does not contain SCM_RIGHTS TUN FD"))?
+            };
+
+            let file = unsafe { File::from_raw_fd(received_fd) };
             guard.clear_ready();
-            return Err(anyhow::anyhow!("UDS message does not contain SCM_RIGHTS TUN FD"));
+            send_tun_ack(&socket, cancel).await?;
+            return Ok(file);
         }
     }
 }
