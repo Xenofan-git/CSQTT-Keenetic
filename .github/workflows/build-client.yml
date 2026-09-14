@@ -25,6 +25,12 @@ jobs:
           toolchain: 1.98.1
           targets: aarch64-unknown-linux-musl
 
+      - name: Install Rust components
+        run: |
+          set -euo pipefail
+          rustup component add rustfmt --toolchain 1.98.1-x86_64-unknown-linux-gnu
+          rustfmt --version
+
       - name: Install Zig and cargo-zigbuild
         run: |
           python3 -m pip install --upgrade pip
