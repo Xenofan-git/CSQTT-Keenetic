@@ -1,3 +1,3 @@
 # Build information
 
-Run40 diagnostic build preparation.
+Run 39 ARM64 client build.
