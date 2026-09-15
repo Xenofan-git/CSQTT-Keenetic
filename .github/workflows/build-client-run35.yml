@@ -6,6 +6,7 @@ on:
     paths:
       - '.github/workflows/build-client-run35.yml'
       - 'patches/csqтt-core/rust-client/tun.rs'
+      - 'scripts/add-tun-diagnostic.py'
 
 jobs:
   build:
@@ -57,58 +58,18 @@ jobs:
           cp patches/csqтt-core/rust-client/tun.rs csqtt-2.1.9/rust-client/tun.rs
           grep -q 'ScmRights' csqtt-2.1.9/rust-client/tun.rs
           grep -q 'UnixAddr::new_abstract' csqtt-2.1.9/rust-client/tun.rs
-          grep -q 'send(' csqtt-2.1.9/rust-client/tun.rs
+          grep -q 'MSG_NOSIGNAL' csqtt-2.1.9/rust-client/tun.rs
 
       - name: Add TUN EINVAL diagnostics
-        working-directory: csqtt-2.1.9/rust-client
         run: |
           set -euo pipefail
-          python3 - <<'PY'
-          from pathlib import Path
-          p = Path('dispatcher.rs')
-          s = p.read_text()
-          old = '''            Ok(Err(error)) => {
-                crate::log_error!("[ОШИБКА] Запись TUN завершена: {error}");
-                TunWriteState::Failed
-            }'''
-          new = '''            Ok(Err(error)) => {
-                if error.raw_os_error() == Some(libc::EINVAL) {
-                    let bytes = packet
-                        .as_slice()
-                        .iter()
-                        .take(32)
-                        .map(|b| format!("{b:02x}"))
-                        .collect::<Vec<_>>()
-                        .join(" ");
-                    let data = packet.as_slice();
-                    let version = data.first().map(|b| b >> 4).unwrap_or(0);
-                    let header = if version == 4 && data.len() >= 20 {
-                        format!("IPv4 {}.{}.{}.{} -> {}.{}.{}.{} proto={} ihl={} total_len={}",
-                            data[12], data[13], data[14], data[15],
-                            data[16], data[17], data[18], data[19],
-                            data[9], (data[0] & 0x0f) * 4,
-                            u16::from_be_bytes([data[2], data[3]]))
-                    } else if version == 6 && data.len() >= 40 {
-                        format!("IPv6 next_header={} payload_len={} bytes", data[6], u16::from_be_bytes([data[4], data[5]]))
-                    } else {
-                        format!("non-IP-or-short version={} len={}", version, data.len())
-                    };
-                    crate::log_error!("[TUN DEBUG] EINVAL len={} {} first32={}", data.len(), header, bytes);
-                }
-                crate::log_error!("[ОШИБКА] Запись TUN завершена: {error}");
-                TunWriteState::Failed
-            }'''
-          if old not in s:
-              raise SystemExit('dispatcher.rs TUN error block not found')
-          p.write_text(s.replace(old, new, 1))
-          PY
-          grep -q '\[TUN DEBUG\] EINVAL' dispatcher.rs
-          sed -n '/\[TUN DEBUG\]/,+3p' dispatcher.rs
+          python3 scripts/add-tun-diagnostic.py
+          grep -q '\[TUN DEBUG\] EINVAL' csqtt-2.1.9/rust-client/dispatcher.rs
 
       - name: Patch musl UDP and ARM64 compatibility
         working-directory: csqtt-2.1.9/rust-client
         run: |
-          set -e
+          set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
           p = Path('Cargo.toml')
@@ -118,8 +79,7 @@ jobs:
               marker = 'getrandom = "0.4"\n'
               if marker not in s:
                   raise SystemExit('Cargo.toml insertion marker not found')
-              s = s.replace(marker, marker + dep + '\n', 1)
-              p.write_text(s)
+              p.write_text(s.replace(marker, marker + dep + '\n', 1))
           PY
           sed -i 's/count: libc::c_int/count: libc::c_uint/g' udp_batch.rs
           sed -i 's/libc::recvmmsg(fd, messages, count, flags, timeout)/libc::recvmmsg(fd, messages, count as libc::c_uint, flags as libc::c_uint, timeout)/g' udp_batch.rs
@@ -153,7 +113,6 @@ jobs:
             esac
           done
           echo "[zig-wrapper] mode=$([[ "$compile" -eq 1 ]] && echo compile || echo link)" >&2
-          echo "[zig-wrapper] args=${args[*]}" >&2
           exec zig cc -target aarch64-linux-musl "${args[@]}"
           EOF
           chmod +x "$RUNNER_TEMP/zig-cc-aarch64-musl"
@@ -167,7 +126,7 @@ jobs:
           readelf -h target/aarch64-unknown-linux-musl/release/client
           sha256sum target/aarch64-unknown-linux-musl/release/client
 
-      - name: Verify TUN receiver and diagnostic source
+      - name: Verify source patches
         working-directory: csqtt-2.1.9/rust-client
         run: |
           set -euo pipefail
