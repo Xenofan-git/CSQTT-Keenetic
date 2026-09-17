@@ -61,25 +61,34 @@ func setOAuthStateCookie(w http.ResponseWriter, r *http.Request, state string) {
     http.SetCookie(w, &http.Cookie{Name: vkOAuthStateCookie, Value: state, Path: "/oauth/vk/callback", HttpOnly: true, SameSite: http.SameSiteLaxMode, Secure: secure, MaxAge: 600})
 }
 
-func vkRedirectURI(r *http.Request) string {
-    if v := strings.TrimSpace(os.Getenv("CSQTT_VK_REDIRECT_URI")); v != "" { return v }
-    scheme := "http"
-    if r.TLS != nil { scheme = "https" }
-    host := r.Host
-    return scheme + "://" + host + "/oauth/vk/callback"
+func vkRedirectURI() (string, error) {
+    v := strings.TrimSpace(os.Getenv("CSQTT_VK_REDIRECT_URI"))
+    if v == "" {
+        return "", fmt.Errorf("CSQTT_VK_REDIRECT_URI is not configured")
+    }
+    u, err := url.Parse(v)
+    if err != nil || u.Scheme == "" || u.Host == "" || u.Path != "/oauth/vk/callback" || u.RawQuery != "" || u.Fragment != "" {
+        return "", fmt.Errorf("invalid CSQTT_VK_REDIRECT_URI")
+    }
+    if u.Scheme != "https" && u.Scheme != "http" {
+        return "", fmt.Errorf("CSQTT_VK_REDIRECT_URI must use http or https")
+    }
+    return v, nil
 }
 
-func vkOAuthURL(r *http.Request, state string) string {
+func vkOAuthURL(state string) (string, error) {
+    redirectURI, err := vkRedirectURI()
+    if err != nil { return "", err }
     q := url.Values{}
     q.Set("client_id", vkWebAppID)
     q.Set("scope", vkWebScope)
-    q.Set("redirect_uri", vkRedirectURI(r))
+    q.Set("redirect_uri", redirectURI)
     q.Set("display", "page")
     q.Set("response_type", "token")
     q.Set("revoke", "1")
     q.Set("v", vkWebVersion)
     q.Set("state", state)
-    return "https://oauth.vk.ru/authorize?" + q.Encode()
+    return "https://oauth.vk.ru/authorize?" + q.Encode(), nil
 }
 
 func readCSQTTConfig() (map[string]any, error) {
@@ -104,8 +113,13 @@ func csqttPanel(w http.ResponseWriter, r *http.Request) {
     if r.URL.Path != "/" { http.NotFound(w, r); return }
     state, err := newOAuthState()
     if err != nil { http.Error(w, "cannot create OAuth state", http.StatusInternalServerError); return }
+    oauthURL, err := vkOAuthURL(state)
+    if err != nil {
+        http.Error(w, "VK OAuth redirect URI is not configured", http.StatusServiceUnavailable)
+        return
+    }
     setOAuthStateCookie(w, r, state)
-    data := struct { OAuthURL string }{OAuthURL: vkOAuthURL(r, state)}
+    data := struct { OAuthURL string }{OAuthURL: oauthURL}
     w.Header().Set("Content-Type", "text/html; charset=utf-8")
     _ = csqttPanelTemplate.Execute(w, data)
 }
