@@ -1,6 +1,8 @@
 package main
 
 import (
+    "crypto/rand"
+    "encoding/base64"
     "encoding/json"
     "fmt"
     "html/template"
@@ -18,6 +20,7 @@ const (
     vkWebAppID = "7793118"
     vkWebScope = "1073737727"
     vkWebVersion = "5.199"
+    vkOAuthStateCookie = "csqtt_vk_oauth_state"
 )
 
 var vkTokenMu sync.Mutex
@@ -47,17 +50,26 @@ func securityHeaders(next http.Handler) http.Handler {
     })
 }
 
+func newOAuthState() (string, error) {
+    b := make([]byte, 32)
+    if _, err := rand.Read(b); err != nil { return "", err }
+    return base64.RawURLEncoding.EncodeToString(b), nil
+}
+
+func setOAuthStateCookie(w http.ResponseWriter, r *http.Request, state string) {
+    secure := r.TLS != nil
+    http.SetCookie(w, &http.Cookie{Name: vkOAuthStateCookie, Value: state, Path: "/oauth/vk/callback", HttpOnly: true, SameSite: http.SameSiteLaxMode, Secure: secure, MaxAge: 600})
+}
+
 func vkRedirectURI(r *http.Request) string {
-    if v := strings.TrimSpace(os.Getenv("CSQTT_VK_REDIRECT_URI")); v != "" {
-        return v
-    }
+    if v := strings.TrimSpace(os.Getenv("CSQTT_VK_REDIRECT_URI")); v != "" { return v }
     scheme := "http"
     if r.TLS != nil { scheme = "https" }
     host := r.Host
     return scheme + "://" + host + "/oauth/vk/callback"
 }
 
-func vkOAuthURL(r *http.Request) string {
+func vkOAuthURL(r *http.Request, state string) string {
     q := url.Values{}
     q.Set("client_id", vkWebAppID)
     q.Set("scope", vkWebScope)
@@ -66,6 +78,7 @@ func vkOAuthURL(r *http.Request) string {
     q.Set("response_type", "token")
     q.Set("revoke", "1")
     q.Set("v", vkWebVersion)
+    q.Set("state", state)
     return "https://oauth.vk.ru/authorize?" + q.Encode()
 }
 
@@ -89,7 +102,10 @@ func writeCSQTTConfig(v map[string]any) error {
 
 func csqttPanel(w http.ResponseWriter, r *http.Request) {
     if r.URL.Path != "/" { http.NotFound(w, r); return }
-    data := struct { OAuthURL string }{OAuthURL: vkOAuthURL(r)}
+    state, err := newOAuthState()
+    if err != nil { http.Error(w, "cannot create OAuth state", http.StatusInternalServerError); return }
+    setOAuthStateCookie(w, r, state)
+    data := struct { OAuthURL string }{OAuthURL: vkOAuthURL(r, state)}
     w.Header().Set("Content-Type", "text/html; charset=utf-8")
     _ = csqttPanelTemplate.Execute(w, data)
 }
@@ -98,7 +114,7 @@ func csqttVKCallback(w http.ResponseWriter, r *http.Request) {
     if r.URL.Path != "/oauth/vk/callback" { http.NotFound(w, r); return }
     w.Header().Set("Content-Type", "text/html; charset=utf-8")
     _, _ = w.Write([]byte(`<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>VK — CSQTT</title></head><body style="font-family:system-ui;max-width:600px;margin:40px auto;padding:20px;background:#111;color:#eee"><h2 id="s">Получаю токен VK…</h2><p id="m">Окно можно закрыть после завершения.</p><script>
-(async()=>{const p=new URLSearchParams(location.hash.replace(/^#/,''));const token=p.get('access_token')||'';const user_id=p.get('user_id')||'';const expires_in=Number(p.get('expires_in')||0);const err=p.get('error');if(err||!token){document.getElementById('s').textContent='Авторизация VK не завершена';document.getElementById('m').textContent=err||'Токен не получен';return}document.getElementById('s').textContent='Проверяю токен через VK…';try{const r=await fetch('/api/vk/token',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token,user_id,expires_in}),cache:'no-store'});const x=await r.json();if(!x.ok)throw new Error(x.error||'Ошибка сохранения');document.getElementById('s').textContent='🟢 VK авторизация завершена';document.getElementById('m').textContent='Токен автоматически проверен и сохранён на Keenetic. Возвращаюсь в панель…';history.replaceState(null,'',location.pathname);setTimeout(()=>location.href='/',1200)}catch(e){document.getElementById('s').textContent='Ошибка VK авторизации';document.getElementById('m').textContent=e.message}})();
+(async()=>{const p=new URLSearchParams(location.hash.replace(/^#/,''));const token=p.get('access_token')||'';const user_id=p.get('user_id')||'';const expires_in=Number(p.get('expires_in')||0);const state=p.get('state')||'';const err=p.get('error');if(err||!token){document.getElementById('s').textContent='Авторизация VK не завершена';document.getElementById('m').textContent=err||'Токен не получен';return}document.getElementById('s').textContent='Проверяю токен через VK…';try{const r=await fetch('/api/vk/token',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token,user_id,expires_in,state}),cache:'no-store'});const x=await r.json();if(!x.ok)throw new Error(x.error||'Ошибка сохранения');document.getElementById('s').textContent='🟢 VK авторизация завершена';document.getElementById('m').textContent='Токен автоматически проверен и сохранён на Keenetic. Возвращаюсь в панель…';history.replaceState(null,'',location.pathname);setTimeout(()=>location.href='/',1200)}catch(e){document.getElementById('s').textContent='Ошибка VK авторизации';document.getElementById('m').textContent=e.message}})();
 </script></body></html>`))
 }
 
@@ -123,10 +139,12 @@ func validateVKToken(token string) (string, error) {
 func csqttSaveVKToken(w http.ResponseWriter, r *http.Request) {
     if r.Method != http.MethodPost { http.Error(w, "method not allowed", http.StatusMethodNotAllowed); return }
     r.Body = http.MaxBytesReader(w, r.Body, 16*1024)
-    var req struct { Token string `json:"token"`; UserID string `json:"user_id"`; ExpiresIn int64 `json:"expires_in"` }
+    var req struct { Token string `json:"token"`; UserID string `json:"user_id"`; ExpiresIn int64 `json:"expires_in"`; State string `json:"state"` }
     if err := json.NewDecoder(r.Body).Decode(&req); err != nil { http.Error(w, "invalid json", http.StatusBadRequest); return }
     token := strings.TrimSpace(req.Token)
     if token == "" || len(token) < 16 || len(token) > 4096 || req.ExpiresIn < 0 { http.Error(w, "invalid token data", http.StatusBadRequest); return }
+    cookie, err := r.Cookie(vkOAuthStateCookie)
+    if err != nil || cookie.Value == "" || req.State == "" || !secureStringEqual(cookie.Value, req.State) { http.Error(w, "invalid OAuth state", http.StatusForbidden); return }
     vkTokenMu.Lock(); defer vkTokenMu.Unlock()
     vkUserID, err := validateVKToken(token)
     if err != nil { http.Error(w, err.Error(), http.StatusUnauthorized); return }
@@ -135,10 +153,18 @@ func csqttSaveVKToken(w http.ResponseWriter, r *http.Request) {
     cfg["vk_access_token"] = token
     cfg["vk_user_id"] = vkUserID
     cfg["vk_token_expires_in"] = req.ExpiresIn
-    if _, ok := cfg["vk_hash_mode"]; !ok { cfg["vk_hash_mode"] = "auto_api" }
+    cfg["vk_hash_mode"] = "auto_api"
     if err := writeCSQTTConfig(cfg); err != nil { http.Error(w, "cannot save config: "+err.Error(), http.StatusInternalServerError); return }
+    http.SetCookie(w, &http.Cookie{Name: vkOAuthStateCookie, Value: "", Path: "/oauth/vk/callback", HttpOnly: true, SameSite: http.SameSiteLaxMode, Secure: r.TLS != nil, MaxAge: -1})
     log.Printf("CSQTT Web Panel: VK access token validated and saved for user %s", vkUserID)
     writeJSON(w, map[string]any{"ok": true, "user_id": vkUserID})
+}
+
+func secureStringEqual(a, b string) bool {
+    if len(a) != len(b) { return false }
+    var diff byte
+    for i := range a { diff |= a[i] ^ b[i] }
+    return diff == 0
 }
 
 func csqttVKStatus(w http.ResponseWriter, r *http.Request) {
