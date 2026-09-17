@@ -6,6 +6,7 @@ on:
     paths:
       - 'main.go'
       - 'webpanel.go'
+      - 'zwaitoauth.go'
       - 'main_test.go'
       - 'go.mod'
       - 'go.sum'
