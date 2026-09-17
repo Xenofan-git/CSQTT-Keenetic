@@ -8,7 +8,19 @@ Linux/Entware-менеджер для существующего нативно�
 
 **Копировать URL или access token вручную не требуется.**
 
-Для автоматического callback адрес `http(s)://<адрес-панели>:2001/oauth/vk/callback` должен быть разрешён как redirect URI приложения VK `7793118`. При необходимости адрес можно зафиксировать через `CSQTT_VK_REDIRECT_URI`.
+### Redirect URI
+
+Для безопасности redirect URI **не берётся из HTTP Host заголовка**. Перед запуском необходимо задать фиксированный адрес через переменную окружения `CSQTT_VK_REDIRECT_URI`, и тот же адрес должен быть разрешён в настройках приложения VK `7793118`.
+
+Пример:
+
+```sh
+export CSQTT_VK_REDIRECT_URI="https://vpn.example.com/oauth/vk/callback"
+```
+
+Допускается `http://` для локального теста; для доступа через интернет рекомендуется `https://`. URI должен точно оканчиваться на `/oauth/vk/callback` и не содержать query или fragment.
+
+Если переменная не задана или URI некорректен, Web Panel не создаёт OAuth-ссылку и не использует адрес из входящего `Host`.
 
 ## Что делает менеджер
 
@@ -36,6 +48,8 @@ chmod 755 /opt/etc/csqtt/client
 ```
 
 Создать `/opt/etc/csqtt/config.json` по `config.example.json`.
+
+Перед запуском задать `CSQTT_VK_REDIRECT_URI`.
 
 Запуск:
 
