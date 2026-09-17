@@ -14,7 +14,7 @@ Linux/Entware-менеджер для существующего нативно�
 - включает `CSQTT_EVENTS=1`;
 - разбирает `TUNCONF` и назначает серверный IPv4 на `csqtt0` как `/32`;
 - автоматически создаёт и сохраняет `device_id/generation/salt` в `state.json`;
-- поддерживает `vk_hash_mode=auto_api`: получает VK call/hash через `api.vk.ru`, передаёт hash в существующий Rust client и завершает созданные VK Calls при остановке;
+- поддерживает режим `vk_hash_mode=auto_api`: получает VK call/hash через `api.vk.ru`, передаёт hash в существующий Rust client и завершает созданные VK Calls при остановке;
 - использует ту же логику количества Auto API calls, что Android CSQTT 2.1.9;
 - поддерживает `vk_access_token` в конфиге или переменную окружения `CSQTT_VK_ACCESS_TOKEN`;
 - содержит VK Web Panel на порту `2001`.
@@ -23,7 +23,7 @@ Linux/Entware-менеджер для существующего нативно�
 
 Панель запускается вместе с менеджером и слушает `0.0.0.0:2001`. Порт выбран отдельно от HydraRoute Web Panel (`2000`).
 
-Кнопка **«Войти через VK»** теперь использует callback самой панели:
+Кнопка **«Войти через VK»** использует callback самой панели:
 
 1. панель формирует OAuth URL с `/oauth/vk/callback`;
 2. пользователь входит в свой VK-аккаунт;
@@ -31,7 +31,7 @@ Linux/Entware-менеджер для существующего нативно�
 4. callback-страница автоматически извлекает token в браузере;
 5. token сразу отправляется на `/api/vk/token`;
 6. менеджер проверяет token через `users.get` API VK;
-7. проверенный token, ID пользователя и срок действия атомарно сохраняются в `/opt/etc/csqtt/config.json`;
+7. проверенный token, ID пользователя и срок действия атомарно сохраняются в `/opt/etc/csqтt/config.json`;
 8. режим `vk_hash_mode` переводится в `auto_api`, если он ещё не задан.
 
 **Копировать URL или access token вручную не требуется.**
@@ -61,8 +61,6 @@ export CSQTT_VK_REDIRECT_URI="https://example.example/oauth/vk/callback"
 - не включает весь LAN в туннель;
 - не реализует CAPTCHA UI;
 - не реализует HydraRoute failover.
-
-Это отдельные этапы после проверки настоящего Rust-транспорта CSQTT на Keenetic.
 
 ## Установка на Entware
 
@@ -109,5 +107,3 @@ GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -trimpath -ldflags='-s -w'
 ```
 
 Цель: ARM64 / Entware `aarch64-k3.10`.
-
-Локальный ARM64 binary `CSQTT-Keenetic` собирается статически. На x86-хосте ARM64 test binary запускать нельзя, поэтому cross-`go test` не используется как runtime-тест.
