@@ -6,6 +6,9 @@ on:
     paths:
       - '.github/workflows/build-client-current.yml'
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -104,3 +107,19 @@ jobs:
             dist/client
             CSQTT-client-current-aarch64-k3.10.tar.gz
             SHA256SUMS
+
+      - name: Publish client to temporary raw branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          git checkout --orphan client-dist
+          git rm -rf . >/dev/null 2>&1 || true
+          cp dist/client ./client
+          cp SHA256SUMS ./SHA256SUMS
+          git add client SHA256SUMS
+          git commit -m "Publish current CSQTT ARM64 client"
+          git push --force origin client-dist
