@@ -35,6 +35,7 @@ func startCSQTTWebPanel() {
     mux.HandleFunc("/api/vk/token", csqttSaveVKToken)
     mux.HandleFunc("/api/vk/status", csqttVKStatus)
     mux.HandleFunc("/api/config", csqttConfigStatus)
+    mux.HandleFunc("/api/workers", csqttWorkers)
     log.Printf("CSQTT Web Panel listening on http://%s", csqttWebListen)
     if err := http.ListenAndServe(csqttWebListen, securityHeaders(mux)); err != nil {
         log.Printf("CSQTT Web Panel stopped: %v", err)
@@ -188,6 +189,29 @@ func csqttVKStatus(w http.ResponseWriter, r *http.Request) {
     writeJSON(w, map[string]any{"ok": true, "authorized": strings.TrimSpace(token) != "", "user_id": userID, "mode": mode, "expires_in": int64(expires)})
 }
 
+func csqttWorkers(w http.ResponseWriter, r *http.Request) {
+    if r.Method == http.MethodGet {
+        cfg, err := readCSQTTConfig()
+        if err != nil { writeJSON(w, map[string]any{"ok": false, "error": err.Error()}); return }
+        workers, _ := cfg["workers"].(float64)
+        if workers < 9 { workers = 9 }
+        if workers > 18 { workers = 18 }
+        writeJSON(w, map[string]any{"ok": true, "workers": int(workers), "min": 9, "max": 18})
+        return
+    }
+    if r.Method != http.MethodPost { http.Error(w, "method not allowed", http.StatusMethodNotAllowed); return }
+    r.Body = http.MaxBytesReader(w, r.Body, 1024)
+    var req struct { Workers int `json:"workers"` }
+    if err := json.NewDecoder(r.Body).Decode(&req); err != nil { http.Error(w, "invalid json", http.StatusBadRequest); return }
+    if req.Workers < 9 || req.Workers > 18 { http.Error(w, "workers must be between 9 and 18", http.StatusBadRequest); return }
+    cfg, err := readCSQTTConfig()
+    if err != nil { http.Error(w, "cannot read config: "+err.Error(), http.StatusInternalServerError); return }
+    cfg["workers"] = req.Workers
+    if err := writeCSQTTConfig(cfg); err != nil { http.Error(w, "cannot save config: "+err.Error(), http.StatusInternalServerError); return }
+    log.Printf("CSQTT Web Panel: workers set to %d", req.Workers)
+    writeJSON(w, map[string]any{"ok": true, "workers": req.Workers, "min": 9, "max": 18})
+}
+
 func csqttConfigStatus(w http.ResponseWriter, r *http.Request) {
     cfg, err := readCSQTTConfig()
     if err != nil { writeJSON(w, map[string]any{"ok": false, "error": err.Error()}); return }
@@ -197,6 +221,6 @@ func csqttConfigStatus(w http.ResponseWriter, r *http.Request) {
 
 func writeJSON(w http.ResponseWriter, value any) { w.Header().Set("Content-Type", "application/json; charset=utf-8"); _ = json.NewEncoder(w).Encode(value) }
 
-var csqttPanelTemplate = template.Must(template.New("panel").Parse(`<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>CSQTT-Keenetic</title><style>body{font-family:system-ui,-apple-system,sans-serif;background:#111;color:#eee;max-width:760px;margin:0 auto;padding:24px}.card{background:#1c1c1c;border:1px solid #333;border-radius:16px;padding:20px;margin:14px 0}button{background:#4f7cff;color:#fff;border:0;border-radius:10px;padding:11px 16px;font-weight:600;cursor:pointer}.secondary{background:#333}.status{font-size:18px}.muted{color:#aaa}.ok{color:#67e8a5}.warn{color:#ffd166}.row{display:flex;gap:10px;flex-wrap:wrap}</style></head><body><h1>CSQTT-Keenetic</h1><div class="card"><div class="status">VK: <span id="vk" class="warn">проверка…</span></div><div id="uid" class="muted"></div><div id="expiry" class="muted"></div></div><div class="card"><h2>Авторизация VK</h2><p class="muted">Нажми «Войти через VK». Авторизация откроется в новом окне. После входа VK автоматически вернёт токен прямо в эту панель — копировать URL или токен не нужно.</p><div class="row"><button onclick="window.open({{printf "%q" .OAuthURL}},'_blank','noopener')">Войти через VK</button><button class="secondary" onclick="refresh()">Обновить</button></div><div id="msg" class="muted"></div></div><div class="card"><h2>Hash режим</h2><div>Сейчас: <b id="mode">—</b></div><p class="muted">После успешной авторизации используется auto_api.</p></div><script>async function refresh(){try{let r=await fetch('/api/vk/status',{cache:'no-store'}),x=await r.json();document.getElementById('vk').textContent=x.authorized?'🟢 Авторизован':'🔴 Не авторизован';document.getElementById('vk').className=x.authorized?'ok':'warn';document.getElementById('uid').textContent=x.user_id?'VK ID: '+x.user_id:'';document.getElementById('mode').textContent=x.mode||'—';document.getElementById('expiry').textContent=x.authorized?(x.expires_in===0?'Токен: без срока действия':'Срок токена: '+x.expires_in+' сек.') : ''}catch(e){document.getElementById('msg').textContent='Не удалось получить статус'}}refresh();</script></body></html>`))
+var csqttPanelTemplate = template.Must(template.New("panel").Parse(`<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>CSQTT-Keenetic</title><style>body{font-family:system-ui,-apple-system,sans-serif;background:#111;color:#eee;max-width:760px;margin:0 auto;padding:24px}.card{background:#1c1c1c;border:1px solid #333;border-radius:16px;padding:20px;margin:14px 0}button{background:#4f7cff;color:#fff;border:0;border-radius:10px;padding:11px 16px;font-weight:600;cursor:pointer}.secondary{background:#333}.status{font-size:18px}.muted{color:#aaa}.ok{color:#67e8a5}.warn{color:#ffd166}.row{display:flex;gap:10px;flex-wrap:wrap}.slider{width:100%;accent-color:#4f7cff}.worker-value{font-size:28px;font-weight:700}.worker-row{display:flex;align-items:center;gap:14px}.worker-range{flex:1}</style></head><body><h1>CSQTT-Keenetic</h1><div class="card"><div class="status">VK: <span id="vk" class="warn">проверка…</span></div><div id="uid" class="muted"></div><div id="expiry" class="muted"></div></div><div class="card"><h2>Авторизация VK</h2><p class="muted">Нажми «Войти через VK». Авторизация откроется в новом окне. После входа VK автоматически вернёт токен прямо в эту панель — копировать URL или токен не нужно.</p><div class="row"><button onclick="window.open({{printf "%q" .OAuthURL}},'_blank','noopener')">Войти через VK</button><button class="secondary" onclick="refresh()">Обновить</button></div><div id="msg" class="muted"></div></div><div class="card"><h2>Потоки клиента</h2><div class="worker-row"><div class="worker-range"><input id="workers" class="slider" type="range" min="9" max="18" step="1" value="9" oninput="document.getElementById('workersValue').textContent=this.value" onchange="saveWorkers()"></div><div id="workersValue" class="worker-value">9</div></div><p class="muted">Диапазон: 9–18 потоков. Значение сохраняется в config.json и применяется после перезапуска CSQTT.</p><div id="workersMsg" class="muted"></div></div><div class="card"><h2>Hash режим</h2><div>Сейчас: <b id="mode">—</b></div><p class="muted">После успешной авторизации используется auto_api.</p></div><script>async function loadWorkers(){try{let r=await fetch('/api/workers',{cache:'no-store'}),x=await r.json();if(x.ok){let n=Math.max(9,Math.min(18,Number(x.workers)||9));document.getElementById('workers').value=n;document.getElementById('workersValue').textContent=n}}catch(e){}}async function saveWorkers(){let n=Number(document.getElementById('workers').value);try{let r=await fetch('/api/workers',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({workers:n}),cache:'no-store'}),x=await r.json();document.getElementById('workersMsg').textContent=x.ok?'🟢 Сохранено: '+n+' потоков':'Ошибка: '+(x.error||'не удалось сохранить')}catch(e){document.getElementById('workersMsg').textContent='Ошибка сохранения'}}async function refresh(){try{let r=await fetch('/api/vk/status',{cache:'no-store'}),x=await r.json();document.getElementById('vk').textContent=x.authorized?'🟢 Авторизован':'🔴 Не авторизован';document.getElementById('vk').className=x.authorized?'ok':'warn';document.getElementById('uid').textContent=x.user_id?'VK ID: '+x.user_id:'';document.getElementById('mode').textContent=x.mode||'—';document.getElementById('expiry').textContent=x.authorized?(x.expires_in===0?'Токен: без срока действия':'Срок токена: '+x.expires_in+' сек.') : ''}catch(e){document.getElementById('msg').textContent='Не удалось получить статус'}}refresh();loadWorkers();</script></body></html>`))
 
 var _ = fmt.Sprintf
