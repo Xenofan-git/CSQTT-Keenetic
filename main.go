@@ -54,7 +54,8 @@ type Config struct {
 
 func defaults(c *Config) {
     if c.Client == "" { c.Client = "/opt/etc/csqtt/client" }
-    if c.Workers == 0 { c.Workers = 18 }
+    if c.Workers < 9 { c.Workers = 9 }
+    if c.Workers > 18 { c.Workers = 18 }
     if c.Obfs == "" { c.Obfs = "audio" }
     if c.TurnTransport == "" { c.TurnTransport = "udp" }
     if c.VKHashMode == "" { c.VKHashMode = "manual" }
