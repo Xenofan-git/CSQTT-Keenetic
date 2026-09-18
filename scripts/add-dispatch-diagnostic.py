@@ -1,108 +1,93 @@
 from pathlib import Path
-import re
 
-p = Path("csqtt-2.1.9/rust-client/dispatcher.rs")
+p = Path("csqtt-current/rust-client/dispatcher.rs")
 s = p.read_text()
 
-if "[CSQTT DEBUG] worker registered" in s:
-    print("dispatcher diagnostics already present")
-    raise SystemExit(0)
+start = s.index("    async fn read_tun(")
+end = s.index("    async fn read_udp(", start)
+section = s[start:end]
 
-register_pattern = re.compile(
-    r"(?ms)^    pub fn register\(&self, channels: WorkerChannels\) \{.*?^    \}\n\n    pub fn unregister\(&self, id: usize, incarnation_id: u64\) \{.*?^    \}\n"
-)
-register_match = register_pattern.search(s)
-if not register_match:
-    raise SystemExit("register/unregister block not found")
-
-register_replacement = '''    pub fn register(&self, channels: WorkerChannels) {
-        let id = channels.id;
-        let incarnation_id = channels.incarnation_id;
-        self.workers.rcu(|workers| {
-            let mut updated = (**workers).clone();
-            updated.retain(|worker| worker.id != id);
-            updated.push(channels.clone());
-            interleave_turn_paths(&mut updated);
-            Arc::new(updated)
-        });
-        crate::log_error!(
-            "[CSQTT DEBUG] worker registered id={} incarnation={} total={}",
-            id,
-            incarnation_id,
-            self.workers.load().len()
-        );
-    }
-
-    pub fn unregister(&self, id: usize, incarnation_id: u64) {
-        self.workers.rcu(|workers| {
-            let mut updated = (**workers).clone();
-            updated.retain(|worker| worker.id != id || worker.incarnation_id != incarnation_id);
-            interleave_turn_paths(&mut updated);
-            Arc::new(updated)
-        });
-        crate::log_error!(
-            "[CSQTT DEBUG] worker unregistered id={} incarnation={} total={}",
-            id,
-            incarnation_id,
-            self.workers.load().len()
-        );
-    }
-'''
-s = s[:register_match.start()] + register_replacement + s[register_match.end():]
-
-dispatch_pattern = re.compile(
-    r"(?ms)^    fn dispatch_now\(&self, scheduler: &mut FastPathScheduler, packet: PacketBuf\) \{.*?^    \}\n\n    \#\[cfg\(unix\)\]"
-)
-dispatch_match = dispatch_pattern.search(s)
-if not dispatch_match:
-    raise SystemExit("dispatch_now block not found")
-
-dispatch_replacement = '''    fn dispatch_now(&self, scheduler: &mut FastPathScheduler, packet: PacketBuf) {
-        let packet_len = packet.len();
-        let worker_count = self.workers.load().len();
-        let Some(ticket) = client_perf::measure_sampled(PerfStage::Scheduler, 64, || {
-            scheduler.begin(&self.workers, packet.as_slice())
-        }) else {
-            crate::log_error!(
-                "[CSQTT DEBUG] DISPATCH DROP no_workers len={} registered={}",
-                packet_len,
-                worker_count
-            );
-            return;
-        };
-        let workers = scheduler.workers();
-        if let Err(packet) = enqueue_selected_worker(workers, ticket, packet) {
-            let queue_len = packet.len();
-            if replace_oldest_in_selected_queue(workers, ticket, packet).is_err() {
-                crate::log_error!(
-                    "[CSQTT DEBUG] DISPATCH DROP queue_reject len={} workers={} slot={} class={}",
-                    queue_len,
-                    workers.len(),
-                    ticket.start_slot,
-                    ticket.class.index()
-                );
-            } else {
-                crate::log_error!(
-                    "[CSQTT DEBUG] DISPATCH forced_replace len={} workers={} slot={} class={}",
-                    queue_len,
-                    workers.len(),
-                    ticket.start_slot,
-                    ticket.class.index()
-                );
+old = """        let mut scheduler = FastPathScheduler::new();
+        let mut flow_sequences = FlowSequencer::new();
+        loop {
+            let readiness = tokio::select! {
+"""
+new = """        let mut scheduler = FastPathScheduler::new();
+        let mut flow_sequences = FlowSequencer::new();
+        let mut tun_debug_reads = 0usize;
+        crate::log_error!("[TUN DEBUG] read_tun task started");
+        loop {
+            if tun_debug_reads < 20 {
+                crate::log_error!("[TUN DEBUG] waiting for TUN readable (sample={})", tun_debug_reads);
             }
-        } else {
-            crate::log_error!(
-                "[CSQTT DEBUG] DISPATCH queued len={} workers={} slot={} class={}",
-                packet_len,
-                workers.len(),
-                ticket.start_slot,
-                ticket.class.index()
-            );
-        }
-    }
+            let readiness = tokio::select! {
+"""
+if old not in section:
+    raise SystemExit("read_tun start anchor not found")
+section = section.replace(old, new, 1)
 
-    #[cfg(unix)]'''
-s = s[:dispatch_match.start()] + dispatch_replacement + s[dispatch_match.end():]
+old = """                Ok(guard) => guard,
+"""
+new = """                Ok(guard) => {
+                    if tun_debug_reads < 20 {
+                        crate::log_error!("[TUN DEBUG] TUN became readable (sample={})", tun_debug_reads);
+                    }
+                    guard
+                },
+"""
+if old not in section:
+    raise SystemExit("readable guard anchor not found")
+section = section.replace(old, new, 1)
 
-p.write_text(s)
-print("dispatcher data-plane diagnostics inserted")
+old = """                    Ok(Ok(0)) => return,
+                    Ok(Ok(length)) => {
+                        burst += 1;
+"""
+new = """                    Ok(Ok(0)) => {
+                        crate::log_error!("[TUN DEBUG] libc::read returned EOF/0");
+                        return;
+                    }
+                    Ok(Ok(length)) => {
+                        if tun_debug_reads < 20 {
+                            crate::log_error!("[TUN DEBUG] libc::read returned {} bytes", length);
+                        }
+                        tun_debug_reads += 1;
+                        burst += 1;
+"""
+if old not in section:
+    raise SystemExit("read result anchor not found")
+section = section.replace(old, new, 1)
+
+old = """                    Ok(Err(error)) if is_retryable_tun_error(&error) => {
+                        break;
+                    }
+"""
+new = """                    Ok(Err(error)) if is_retryable_tun_error(&error) => {
+                        if tun_debug_reads < 20 {
+                            crate::log_error!("[TUN DEBUG] libc::read retryable error: {error}");
+                        }
+                        tun_debug_reads += 1;
+                        break;
+                    }
+"""
+if old not in section:
+    raise SystemExit("retry anchor not found")
+section = section.replace(old, new, 1)
+
+old = """                    Ok(Err(error)) => {
+                        crate::log_error!("[ОШИБКА] Чтение TUN завершено: {error}");
+                        return;
+                    }
+"""
+new = """                    Ok(Err(error)) => {
+                        crate::log_error!("[TUN DEBUG] libc::read fatal error: {error}");
+                        crate::log_error!("[ОШИБКА] Чтение TUN завершено: {error}");
+                        return;
+                    }
+"""
+if old not in section:
+    raise SystemExit("fatal anchor not found")
+section = section.replace(old, new, 1)
+
+p.write_text(s[:start] + section + s[end:])
+print("TUN read diagnostics inserted")
