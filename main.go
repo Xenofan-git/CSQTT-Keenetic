@@ -320,6 +320,12 @@ func main() {
         }
         if err := s.Err(); err != nil { log.Printf("client stdout: %v", err) }
     }()
+    // Give the client a short startup window before the first UDS connect.
+    // On slower Keenetic/3.10 systems the client can create the listener a little
+    // later than the manager starts, which otherwise causes a spurious first
+    // connection refusal/EPIPE during the TUN FD handshake.
+    time.Sleep(750 * time.Millisecond)
+
     var sent bool
     for i := 0; i < 40 && !sent; i++ {
         if err := sendFD(udsName, tun, 3*time.Second); err == nil {
