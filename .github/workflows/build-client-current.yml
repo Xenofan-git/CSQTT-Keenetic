@@ -6,6 +6,7 @@ on:
     paths:
       - '.github/workflows/build-client-current.yml'
       - 'patches/csqтt-core/rust-client/tun.rs'
+      - 'scripts/add-dispatch-diagnostic.py'
 
 permissions:
   contents: write
