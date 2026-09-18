@@ -293,10 +293,10 @@ func main() {
     } else if c.VKHashMode == "manual" && len(c.VKHashes) == 0 {
         log.Fatalf("manual vk_hash_mode requires at least one vk_hash")
     }
-    tun, err := createTUN(tunName)
-    if err != nil { log.Fatalf("TUN: %v", err) }
-    defer tun.Close()
-    log.Printf("TUN created: %s fd=%d mtu=%d", tunName, tun.Fd(), tunMTU)
+    // Start the Rust client before creating the TUN FD. The upstream Android
+    // client follows the same lifecycle: the Rust client first binds the persistent
+    // UDS receiver, then VpnService creates the TUN and passes its FD. This avoids
+    // making TUN creation part of the UDS startup race.
     ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
     defer stop()
     cmd := exec.CommandContext(ctx, c.Client, buildClientArgs(c)...)
@@ -320,11 +320,16 @@ func main() {
         }
         if err := s.Err(); err != nil { log.Printf("client stdout: %v", err) }
     }()
-    // Give the client a short startup window before the first UDS connect.
-    // On slower Keenetic/3.10 systems the client can create the listener a little
-    // later than the manager starts, which otherwise causes a spurious first
-    // connection refusal/EPIPE during the TUN FD handshake.
-    time.Sleep(750 * time.Millisecond)
+    // The client owns the persistent UDS receiver. Wait/retry here exactly
+    // like the Android VpnService does, then pass the already-created TUN FD.
+    tun, err := createTUN(tunName)
+    if err != nil {
+        _ = cmd.Process.Kill()
+        <-clientDone
+        log.Fatalf("TUN: %v", err)
+    }
+    defer tun.Close()
+    log.Printf("TUN created: %s fd=%d mtu=%d", tunName, tun.Fd(), tunMTU)
 
     var sent bool
     for i := 0; i < 40 && !sent; i++ {
