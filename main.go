@@ -364,7 +364,10 @@ func main() {
             select {
             case err := <-clientDone: log.Fatalf("client exited before TUN FD transfer: %v", err)
             case <-ctx.Done(): return
-            case <-time.After(250 * time.Millisecond):
+            // The Rust client exits quickly if the TUN FD never arrives.
+            // Retry almost immediately after a startup-time UDS refusal so we
+            // can catch the listener as soon as it is bound.
+            case <-time.After(10 * time.Millisecond):
             }
         }
     }
