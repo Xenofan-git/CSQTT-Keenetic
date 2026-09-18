@@ -221,9 +221,31 @@ func vkFinishCall(token, callID string) error {
     return nil
 }
 
-func resolveAutoAPI(c Config) ([]string, []string, error) {
+func resolveAutoAPIToken(c Config) string {
     token := strings.TrimSpace(c.VKAccessToken)
-    if token == "" { token = strings.TrimSpace(os.Getenv("CSQTT_VK_ACCESS_TOKEN")) }
+    if token == "" {
+        token = strings.TrimSpace(os.Getenv("CSQTT_VK_ACCESS_TOKEN"))
+    }
+    if token != "" {
+        return token
+    }
+    for _, path := range []string{"/opt/etc/csqtt/vk_token.json", "/opt/etc/csqтt/vk_token.json"} {
+        b, err := os.ReadFile(path)
+        if err != nil {
+            continue
+        }
+        var saved struct {
+            AccessToken string `json:"access_token"`
+        }
+        if json.Unmarshal(b, &saved) == nil && strings.TrimSpace(saved.AccessToken) != "" {
+            return strings.TrimSpace(saved.AccessToken)
+        }
+    }
+    return ""
+}
+
+func resolveAutoAPI(c Config) ([]string, []string, error) {
+    token := resolveAutoAPIToken(c)
     if token == "" { return nil, nil, fmt.Errorf("vk_hash_mode=auto_api requires vk_access_token or CSQTT_VK_ACCESS_TOKEN") }
     count := autoCallCount(c.Workers)
     interval := 80 * time.Millisecond
