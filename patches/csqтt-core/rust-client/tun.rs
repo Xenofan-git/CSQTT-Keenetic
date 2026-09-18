@@ -18,17 +18,21 @@ impl FdReceiver {
         };
         use std::os::fd::AsRawFd;
 
+        eprintln!("[TUN FD] bind: creating AF_UNIX listener");
         let listener = socket(
             AddressFamily::Unix,
             SockType::Stream,
             SockFlag::SOCK_CLOEXEC | SockFlag::SOCK_NONBLOCK,
             None,
         )?;
+        eprintln!("[TUN FD] bind: socket created");
         bind(
             listener.as_raw_fd(),
             &UnixAddr::new_abstract(name.as_bytes())?,
         )?;
         listen(&listener, Backlog::new(4)?)?;
+        eprintln!("[TUN FD] bind: abstract UDS listener ready");
+        eprintln!("[TUN FD] bind: OK");
         Ok(Self {
             listener: tokio::io::unix::AsyncFd::new(listener)?,
         })
@@ -51,6 +55,7 @@ impl FdReceiver {
                     let mut ready = ready?;
                     match accept(self.listener.get_ref().as_raw_fd()) {
                         Ok(descriptor) => {
+                            eprintln!("[TUN FD] accept: connection accepted");
                             let descriptor = unsafe { OwnedFd::from_raw_fd(descriptor) };
                             configure_nonblocking(descriptor.as_raw_fd())?;
                             break descriptor;
@@ -69,6 +74,7 @@ impl FdReceiver {
                 ready = connection.readable() => {
                     let mut ready = ready?;
                     let mut slices = [IoSliceMut::new(&mut data)];
+                    eprintln!("[TUN FD] recvmsg: waiting for SCM_RIGHTS");
                     let mut ancillary = cmsg_space!([std::os::fd::RawFd; 1]);
                     match recvmsg::<nix::sys::socket::UnixAddr>(
                         connection.get_ref().as_raw_fd(),
@@ -77,6 +83,7 @@ impl FdReceiver {
                         MsgFlags::empty(),
                     ) {
                         Ok(message) => {
+                            eprintln!("[TUN FD] recvmsg: message bytes={}", message.bytes);
                             if message.bytes == 0 {
                                 bail!("TUN FD connection closed");
                             }
@@ -84,13 +91,15 @@ impl FdReceiver {
                                 if let ControlMessageOwned::ScmRights(descriptors) = control
                                     && let Some(descriptor) = descriptors.into_iter().next()
                                 {
+                                    eprintln!("[TUN FD] SCM_RIGHTS: FD received");
                                     let file = unsafe { File::from_raw_fd(descriptor) };
                                     configure_nonblocking(file.as_raw_fd())?;
-                                    let _ = send(
+                                    let sent = send(
                                         connection.get_ref().as_raw_fd(),
                                         &[1],
                                         MsgFlags::MSG_NOSIGNAL,
                                     );
+                                    eprintln!("[TUN FD] ACK: send result={:?}", sent);
                                     return Ok(file);
                                 }
                             }
