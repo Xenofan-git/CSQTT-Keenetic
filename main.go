@@ -324,6 +324,11 @@ func main() {
     cmd := exec.CommandContext(ctx, c.Client, buildClientArgs(c)...)
     cmd.Env = append(os.Environ(), "CSQTT_EVENTS=1")
     cmd.Stderr = os.Stderr
+    // Keep the client's control stdin open. With CSQTT_EVENTS=1 the Rust
+    // client treats stdin EOF as a shutdown signal; exec.Cmd otherwise gives
+    // it a closed/null stdin and it immediately cancels before the TUN FD arrives.
+    clientStdin, err := cmd.StdinPipe()
+    if err != nil { log.Fatalf("stdin pipe: %v", err) }
     stdout, err := cmd.StdoutPipe()
     if err != nil { log.Fatalf("stdout pipe: %v", err) }
     if err := cmd.Start(); err != nil { log.Fatalf("start client: %v", err) }
