@@ -5,6 +5,7 @@ on:
   push:
     paths:
       - '.github/workflows/build-client-current.yml'
+      - 'patches/csqтt-core/rust-client/tun.rs'
 
 permissions:
   contents: write
@@ -40,6 +41,12 @@ jobs:
           git clone --depth 1 --branch main https://github.com/amurcanov/csqtt.git csqtt-current
           grep -q 'ScmRights' csqtt-current/rust-client/tun.rs
           grep -q 'FrameHeader::decode' csqtt-current/rust-client/dispatcher.rs
+
+      - name: Apply diagnostic TUN FD receiver
+        run: |
+          set -euo pipefail
+          cp 'patches/csqтt-core/rust-client/tun.rs' csqtt-current/rust-client/tun.rs
+          grep -q '\[TUN FD\]' csqtt-current/rust-client/tun.rs
 
       - name: Patch musl UDP and ARM64 compatibility
         working-directory: csqtt-current/rust-client
@@ -123,5 +130,5 @@ jobs:
           cp /tmp/csqtt-client ./client
           cp /tmp/CSQTT-SHA256SUMS ./SHA256SUMS
           git add client SHA256SUMS
-          git commit -m "Publish current CSQTT ARM64 client"
+          git commit -m "Publish diagnostic CSQTT ARM64 client"
           git push --force origin client-dist
