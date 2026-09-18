@@ -47,36 +47,6 @@ jobs:
         run: |
           set -euo pipefail
           cp 'patches/csqтt-core/rust-client/tun.rs' csqtt-current/rust-client/tun.rs
-          python3 - <<'PY'
-          from pathlib import Path
-          p = Path('csqtt-current/rust-client/tun.rs')
-          s = p.read_text()
-          replacements = [
-              ('let listener = socket(\n',
-               'eprintln!("[TUN FD] bind: creating AF_UNIX listener");\n        let listener = socket(\n'),
-              ('bind(\n            listener.as_raw_fd(),',
-               'eprintln!("[TUN FD] bind: socket created");\n        bind(\n            listener.as_raw_fd(),'),
-              ('listen(&listener, Backlog::new(4)?)?;\n',
-               'listen(&listener, Backlog::new(4)?)?;\n        eprintln!("[TUN FD] bind: abstract UDS listener ready");\n'),
-              ('Ok(Self {\n            listener:',
-               'eprintln!("[TUN FD] bind: OK");\n        Ok(Self {\n            listener:'),
-              ('Ok(descriptor) => {\n',
-               'Ok(descriptor) => {\n                            eprintln!("[TUN FD] accept: connection accepted");\n'),
-              ('match recvmsg::<nix::sys::socket::UnixAddr>(\n',
-               'eprintln!("[TUN FD] recvmsg: waiting for SCM_RIGHTS");\n                    match recvmsg::<nix::sys::socket::UnixAddr>(\n'),
-              ('Ok(message) => {\n                            if message.bytes == 0 {',
-               'Ok(message) => {\n                            eprintln!("[TUN FD] recvmsg: message bytes={}", message.bytes);\n                            if message.bytes == 0 {'),
-              ('let file = unsafe { File::from_raw_fd(descriptor) };\n',
-               'eprintln!("[TUN FD] SCM_RIGHTS: FD received");\n                                    let file = unsafe { File::from_raw_fd(descriptor) };\n'),
-              ('let _ = send(\n                                        connection.get_ref().as_raw_fd(),\n                                        &[1],\n                                        MsgFlags::MSG_NOSIGNAL,\n                                    );\n                                    return Ok(file);',
-               'let sent = send(\n                                        connection.get_ref().as_raw_fd(),\n                                        &[1],\n                                        MsgFlags::MSG_NOSIGNAL,\n                                    );\n                                    eprintln!("[TUN FD] ACK: send result={:?}", sent);\n                                    return Ok(file);')
-          ]
-          for old, new in replacements:
-              if old not in s:
-                  raise SystemExit(f"diagnostic insertion anchor not found: {old[:60]!r}")
-              s = s.replace(old, new, 1)
-          p.write_text(s)
-          PY
           grep -q '\[TUN FD\] ACK' csqtt-current/rust-client/tun.rs
           python3 scripts/add-dispatch-diagnostic.py
           grep -q '\[TUN DEBUG\] read_tun task started' csqtt-current/rust-client/dispatcher.rs
