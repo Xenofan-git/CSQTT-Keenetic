@@ -329,6 +329,9 @@ func main() {
     // it a closed/null stdin and it immediately cancels before the TUN FD arrives.
     clientStdin, err := cmd.StdinPipe()
     if err != nil { log.Fatalf("stdin pipe: %v", err) }
+    // Keep this writer alive for the whole client lifetime; closing it would
+    // intentionally produce EOF and stop the Rust client's control task.
+    defer clientStdin.Close()
     stdout, err := cmd.StdoutPipe()
     if err != nil { log.Fatalf("stdout pipe: %v", err) }
     if err := cmd.Start(); err != nil { log.Fatalf("start client: %v", err) }
