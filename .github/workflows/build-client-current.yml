@@ -116,10 +116,12 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git fetch origin main
+          cp dist/client /tmp/csqtt-client
+          cp SHA256SUMS /tmp/CSQTT-SHA256SUMS
           git checkout --orphan client-dist
           git rm -rf . >/dev/null 2>&1 || true
-          cp dist/client ./client
-          cp SHA256SUMS ./SHA256SUMS
+          cp /tmp/csqtt-client ./client
+          cp /tmp/CSQTT-SHA256SUMS ./SHA256SUMS
           git add client SHA256SUMS
           git commit -m "Publish current CSQTT ARM64 client"
           git push --force origin client-dist
