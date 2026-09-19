@@ -75,9 +75,6 @@ func deployValidate(r DeployRequest) error {
     if strings.TrimSpace(r.WebUser) == "" || strings.TrimSpace(r.WebPass) == "" {
         return fmt.Errorf("нужны WEB user и WEB password")
     }
-    if strings.TrimSpace(r.ServerPass) == "" {
-        return fmt.Errorf("нужен пароль CSQTT сервера")
-    }
     return nil
 }
 
@@ -240,6 +237,17 @@ func deployServer(ctx context.Context, r DeployRequest, progress func(string)) (
     defer deployMu.Unlock()
     if err := deployValidate(r); err != nil { return nil, err }
     if r.Version == "" { r.Version = csqttDeployVersion }
+    if strings.TrimSpace(r.ServerPass) == "" {
+        cfg, cfgErr := readCSQTTConfig()
+        if cfgErr != nil {
+            return nil, fmt.Errorf("пароль CSQTT не указан и текущий config недоступен: %w", cfgErr)
+        }
+        if p, ok := cfg["password"].(string); ok && strings.TrimSpace(p) != "" {
+            r.ServerPass = p
+        } else {
+            return nil, fmt.Errorf("укажите пароль CSQTT сервера")
+        }
+    }
 
     if runtime.GOOS != "linux" {
         return nil, fmt.Errorf("deploy выполняется с Linux/Entware router")
