@@ -8,6 +8,7 @@ on:
       - 'webpanel.go'
       - 'deploy.go'
       - 'config.example.json'
+      - 'scripts/**'
       - 'go.mod'
       - '.github/workflows/build-manager-run41.yml'
 
@@ -17,15 +18,12 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
           go-version: '1.25.x'
-
       - name: Test host
         run: go test ./...
-
       - name: Build ARM64 static
         env:
           GOOS: linux
@@ -35,12 +33,10 @@ jobs:
           go build -trimpath -ldflags='-s -w' -o CSQTT-Keenetic-arm64 .
           file CSQTT-Keenetic-arm64
           sha256sum CSQTT-Keenetic-arm64
-
       - name: Package
         run: |
-          tar -czf CSQTT-Keenetic-arm64-run41.tar.gz CSQTT-Keenetic-arm64
+          tar -czf CSQTT-Keenetic-arm64-run41.tar.gz CSQTT-Keenetic-arm64 scripts
           sha256sum CSQTT-Keenetic-arm64-run41.tar.gz
-
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
@@ -48,3 +44,4 @@ jobs:
           path: |
             CSQTT-Keenetic-arm64
             CSQTT-Keenetic-arm64-run41.tar.gz
+            scripts
