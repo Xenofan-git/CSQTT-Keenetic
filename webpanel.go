@@ -1,6 +1,7 @@
 package main
 
 import (
+    "context"
     "encoding/json"
     "fmt"
     "html/template"
@@ -9,6 +10,7 @@ import (
     "net/url"
     "os"
     "strings"
+    "time"
     "sync"
 )
 
@@ -33,6 +35,7 @@ func startCSQTTWebPanel() {
     mux.HandleFunc("/api/vk/status", csqttVKStatus)
     mux.HandleFunc("/api/vk/mode", csqttSetVKMode)
     mux.HandleFunc("/api/config", csqttConfigStatus)
+    mux.HandleFunc("/api/deploy/server", csqttDeployServer)
 
     log.Printf("CSQTT Web Panel listening on http://%s", csqttWebListen)
     if err := http.ListenAndServe(csqttWebListen, mux); err != nil {
@@ -200,6 +203,29 @@ func csqttVKStatus(w http.ResponseWriter, r *http.Request) {
     })
 }
 
+func csqttDeployServer(w http.ResponseWriter, r *http.Request) {
+    if r.Method != http.MethodPost {
+        http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+        return
+    }
+    var req DeployRequest
+    if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+        http.Error(w, "invalid json", http.StatusBadRequest)
+        return
+    }
+    ctx, cancel := context.WithTimeout(r.Context(), 30*time.Minute)
+    defer cancel()
+    result, err := deployServer(ctx, req, func(msg string) {
+        log.Printf("CSQTT Deploy: %s", msg)
+    })
+    if err != nil {
+        log.Printf("CSQTT Deploy failed: %v", err)
+        writeJSON(w, map[string]any{"ok": false, "error": err.Error()})
+        return
+    }
+    writeJSON(w, result)
+}
+
 func csqttConfigStatus(w http.ResponseWriter, r *http.Request) {
     cfg, err := readCSQTTConfig()
     if err != nil {
@@ -255,6 +281,32 @@ code{word-break:break-all;color:#9ecbff}
 <div id="modeMsg" class="muted"></div>
 </div>
 <script>
+async function deployServer(){
+  const msg=document.getElementById('deployMsg');
+  msg.textContent='⏳ Подготовка deploy…\nЭто может занять несколько минут.';
+  const body={
+    host:document.getElementById('dHost').value.trim(),
+    ssh_port:Number(document.getElementById('dSSH').value),
+    user:document.getElementById('dUser').value.trim(),
+    key_path:document.getElementById('dKey').value.trim(),
+    password:document.getElementById('dPassword').value,
+    peer_port:Number(document.getElementById('dPeer').value),
+    web_port:Number(document.getElementById('dWeb').value),
+    web_user:document.getElementById('dWebUser').value.trim(),
+    web_pass:document.getElementById('dWebPass').value,
+    server_password:document.getElementById('dServerPass').value,
+    version:'v2.1.9'
+  };
+  let r;
+  try{
+    r=await fetch('/api/deploy/server',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const x=await r.json();
+    msg.textContent=x.ok
+      ? '✅ DEPLOY УСПЕШЕН\nVPS: '+x.server+'\nArch: '+x.arch+'\nUDP: '+x.peer_port+'\nWEB: '+x.web_port+'\nAsset: '+x.asset
+      : '❌ Ошибка: '+(x.error||'unknown');
+  }catch(e){ msg.textContent='❌ Ошибка соединения с панелью: '+e; }
+}
+
 async function refresh(){
   let r=await fetch('/api/vk/status');let x=await r.json();
   document.getElementById('vk').textContent=x.authorized?'🟢 Авторизован':'🔴 Не авторизован';
