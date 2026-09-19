@@ -178,7 +178,7 @@ func deployRemoteArch(ctx context.Context, r DeployRequest) (string, error) {
 
 func deployFindAsset(ctx context.Context, version, arch string) (deployAsset, error) {
     if version == "" { version = csqttDeployVersion }
-    u := "https://api.github.com/repos/amurcanov/csqtt/releases/tags/" + strings.TrimPrefix(version, "v")
+    u := "https://api.github.com/repos/amurcanov/csqtt/releases/tags/" + strings.TrimPrefix(version, "")
     req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
     if err != nil { return deployAsset{}, err }
     req.Header.Set("Accept", "application/vnd.github+json")
