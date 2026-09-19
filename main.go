@@ -56,12 +56,13 @@ type Config struct {
 func defaults(c *Config) {
     if c.Client == "" { c.Client = "/opt/etc/csqtt/client" }
     if c.Workers == 0 { c.Workers = 18 }
-    if c.Obfs == "" { c.Obfs = "audio" }
+    if c.Obfs == "" { c.Obfs = "video" }
     if c.TurnTransport == "" { c.TurnTransport = "udp" }
-    if c.VKHashMode == "" { c.VKHashMode = "manual" }
+    if c.VKHashMode == "" { c.VKHashMode = "auto_api" }
     if c.VKAuthMode == "" { c.VKAuthMode = "vkcalls" }
-    if c.Fingerprint == "" { c.Fingerprint = "chrome" }
+    if c.Fingerprint == "" { c.Fingerprint = "firefox" }
     if c.CaptchaMode == "" { c.CaptchaMode = "auto" }
+    if c.ClientIDs == "" { c.ClientIDs = "8202606,6287487" }
     if c.StateFile == "" { c.StateFile = "/opt/etc/csqtt/state.json" }
 }
 
