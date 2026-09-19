@@ -43,6 +43,62 @@ jobs:
           grep -q 'ScmRights' csqtt-current/rust-client/tun.rs
           grep -q 'FrameHeader::decode' csqtt-current/rust-client/dispatcher.rs
 
+      - name: Add CSQ5 downlink frame compatibility
+        working-directory: csqtt-current
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('shared/flow_frame.rs')
+          s = p.read_text()
+          old = '''    pub fn decode(packet: &[u8]) -> Option<(Self, &[u8])> {
+        if packet.len() < FRAME_LEN || packet[..4] != FRAME_MAGIC {
+            return None;
+        }
+        Some((
+            Self {
+                sender_id: u64::from_be_bytes(packet[4..12].try_into().ok()?),
+                flow_id: u64::from_be_bytes(packet[12..20].try_into().ok()?),
+                sequence: u32::from_be_bytes(packet[20..24].try_into().ok()?),
+            },
+            &packet[FRAME_LEN..],
+        ))
+    }'''
+          new = '''    pub fn decode(packet: &[u8]) -> Option<(Self, &[u8])> {
+        if packet.len() < FRAME_LEN {
+            return None;
+        }
+        if packet[..4] == FRAME_MAGIC {
+            return Some((
+                Self {
+                    sender_id: u64::from_be_bytes(packet[4..12].try_into().ok()?),
+                    flow_id: u64::from_be_bytes(packet[12..20].try_into().ok()?),
+                    sequence: u32::from_be_bytes(packet[20..24].try_into().ok()?),
+                },
+                &packet[FRAME_LEN..],
+            ));
+        }
+        // CSQTT 2.2.x WIRE-3 server framing: CSQ5 + version(u32) +
+        // sender_id(u32) + flow_id(u64) + sequence(u32).
+        const CSQ5_MAGIC: [u8; 4] = [0xc5, b'S', b'Q', b'5'];
+        if packet[..4] == CSQ5_MAGIC
+            && u32::from_be_bytes(packet[4..8].try_into().ok()?) == 1
+        {
+            return Some((
+                Self {
+                    sender_id: u64::from(u32::from_be_bytes(packet[8..12].try_into().ok()?)),
+                    flow_id: u64::from_be_bytes(packet[12..20].try_into().ok()?),
+                    sequence: u32::from_be_bytes(packet[20..24].try_into().ok()?),
+                },
+                &packet[FRAME_LEN..],
+            ));
+        }
+        None
+    }'''
+          if old not in s:
+              raise SystemExit('flow_frame decode block not found')
+          p.write_text(s.replace(old, new, 1))
+          PY
+          grep -q 'CSQ5_MAGIC' shared/flow_frame.rs
       - name: Apply TUN FD receiver patch and diagnostics
         run: |
           set -euo pipefail
