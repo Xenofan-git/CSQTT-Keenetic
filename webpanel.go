@@ -33,6 +33,7 @@ func startCSQTTWebPanel() {
     mux := http.NewServeMux()
     mux.HandleFunc("/", csqttPanel)
     mux.HandleFunc("/api/vk/token", csqttSaveVKToken)
+    mux.HandleFunc("/api/vk/oauth-url", csqttVKOAuthURL)
     mux.HandleFunc("/api/vk/status", csqttVKStatus)
     mux.HandleFunc("/api/vk/mode", csqttSetVKMode)
     mux.HandleFunc("/api/config", csqttConfigStatus)
@@ -54,6 +55,14 @@ func vkOAuthURL() string {
     q.Set("revoke", "1")
     q.Set("v", vkWebVersion)
     return "https://oauth.vk.ru/authorize?" + q.Encode()
+}
+
+func csqttVKOAuthURL(w http.ResponseWriter, r *http.Request) {
+    if r.Method != http.MethodGet {
+        http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+        return
+    }
+    writeJSON(w, map[string]any{"ok": true, "url": vkOAuthURL()})
 }
 
 func readCSQTTConfig() (map[string]any, error) {
@@ -308,8 +317,16 @@ code{word-break:break-all;color:#9ecbff}
 <div id="modeMsg" class="muted"></div>
 </div>
 <script>
-document.getElementById('vkLogin').addEventListener('click', function(){
-  window.open({{.OAuthURL | printf "%q" | js}}, '_blank', 'noopener');
+document.getElementById('vkLogin').addEventListener('click', async function(){
+  const msg=document.getElementById('msg');
+  try{
+    const r=await fetch('/api/vk/oauth-url');
+    const x=await r.json();
+    if(!x.ok || !x.url) throw new Error(x.error||'OAuth URL не получен');
+    window.open(x.url, '_blank', 'noopener');
+  }catch(e){
+    msg.textContent='Не удалось открыть VK: '+e.message;
+  }
 });
 async function deployServer(){
   const msg=document.getElementById('deployMsg');
