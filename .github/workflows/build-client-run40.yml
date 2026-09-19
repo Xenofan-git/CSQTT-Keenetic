@@ -7,6 +7,7 @@ on:
       - '.github/workflows/build-client-run40.yml'
       - 'patches/csqтt-core/rust-client/tun.rs'
       - 'scripts/add-dispatch-diagnostic.py'
+      - 'patches/csqтt-core/rust-client/flow_frame-csq5.patch'
 
 jobs:
   build:
@@ -42,6 +43,13 @@ jobs:
       - name: Download CSQTT source 2.1.9
         run: |
           git clone --depth 1 --branch v2.1.9 https://github.com/amurcanov/csqtt.git csqtt-2.1.9
+
+      - name: Add CSQ5 downlink frame compatibility
+        run: |
+          set -euo pipefail
+          cd csqtt-2.1.9
+          git apply ../patches/csqтt-core/rust-client/flow_frame-csq5.patch
+          grep -q 'CSQ5_MAGIC' shared/flow_frame.rs
 
       - name: Apply Linux TUN receiver
         run: |
