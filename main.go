@@ -415,7 +415,10 @@ func main() {
         } else {
             log.Printf("waiting for client UDS: %v", err)
             select {
-            case err := <-clientDone: log.Fatalf("client exited before TUN FD transfer: %v", err)
+            case err := <-clientDone:
+                log.Printf("client exited before TUN FD transfer: %v", err)
+                waitForManagerShutdown(ctx, "client exited before TUN FD transfer")
+                return
             case <-ctx.Done(): return
             // The Rust client exits quickly if the TUN FD never arrives.
             // Retry almost immediately after a startup-time UDS refusal so we
@@ -424,11 +427,24 @@ func main() {
             }
         }
     }
-    if !sent { _ = cmd.Process.Kill(); <-clientDone; log.Fatal("could not pass TUN FD to client") }
+    if !sent {
+        _ = cmd.Process.Kill()
+        <-clientDone
+        waitForManagerShutdown(ctx, "could not pass TUN FD to client")
+        return
+    }
     clientIP, err := waitForTUNCONF(lines, 30*time.Second)
-    if err != nil { _ = cmd.Process.Kill(); log.Fatalf("TUNCONF: %v", err) }
+    if err != nil {
+        _ = cmd.Process.Kill()
+        waitForManagerShutdown(ctx, fmt.Sprintf("TUNCONF: %v", err))
+        return
+    }
     log.Printf("server assigned TUN IP: %s", clientIP)
-    if err := configureTUN(clientIP); err != nil { _ = cmd.Process.Kill(); log.Fatalf("configure TUN: %v", err) }
+    if err := configureTUN(clientIP); err != nil {
+        _ = cmd.Process.Kill()
+        waitForManagerShutdown(ctx, fmt.Sprintf("configure TUN: %v", err))
+        return
+    }
     log.Printf("TUN configured: %s %s/32 mtu=%d", tunName, clientIP, tunMTU)
     err = <-clientDone
     if err != nil {
