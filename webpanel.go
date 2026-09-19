@@ -268,6 +268,19 @@ code{word-break:break-all;color:#9ecbff}
 <div id="msg" class="muted"></div>
 </div>
 <div class="card">
+<h2>🚀 Deploy CSQTT Server</h2>
+<p class="muted">Отдельный сервер для Keenetic. Существующий Android endpoint не трогаем. По умолчанию Keenetic использует UDP <b>46010</b>, WEB-панель сервера — TCP <b>46012</b>.</p>
+<div class="row"><div style="flex:1;min-width:220px"><label>VPS host</label><input id="dHost" value="72.56.81.131"></div><div style="width:110px"><label>SSH port</label><input id="dSSH" type="number" value="22"></div></div>
+<div class="row"><div style="flex:1;min-width:180px"><label>SSH user</label><input id="dUser" value="root"></div><div style="flex:1;min-width:180px"><label>SSH key на Keenetic</label><input id="dKey" placeholder="/opt/etc/dropbear/id_ed25519"></div></div>
+<label>SSH password <small>(если key не используется; нужен sshpass)</small></label><input id="dPassword" type="password" autocomplete="off">
+<div class="row"><div style="flex:1;min-width:180px"><label>CSQTT UDP port</label><input id="dPeer" type="number" value="46010"></div><div style="flex:1;min-width:180px"><label>Server WEB port</label><input id="dWeb" type="number" value="46012"></div></div>
+<div class="row"><div style="flex:1;min-width:180px"><label>WEB user</label><input id="dWebUser" value="admin"></div><div style="flex:1;min-width:180px"><label>WEB password</label><input id="dWebPass" type="password" autocomplete="new-password"></div></div>
+<label>Пароль CSQTT для клиентов</label><input id="dServerPass" type="password" autocomplete="new-password">
+<label><input id="dUse" type="checkbox" checked> После успешного deploy переключить этот Keenetic client на новый сервер</label>
+<div class="row"><button onclick="deployServer()">🚀 Deploy / Redeploy</button></div>
+<pre id="deployMsg" class="muted" style="white-space:pre-wrap"></pre>
+</div>
+<div class="card">
 <h2>Hash режим</h2>
 <p class="muted">Один авторизованный VK аккаунт используется для обоих автоматических режимов.</p>
 <label><input type="radio" name="hashMode" value="manual" onchange="modeChanged()"> Ручной — вставить VK hashes</label>
@@ -295,6 +308,7 @@ async function deployServer(){
     web_user:document.getElementById('dWebUser').value.trim(),
     web_pass:document.getElementById('dWebPass').value,
     server_password:document.getElementById('dServerPass').value,
+    use_for_router:document.getElementById('dUse').checked,
     version:'v2.1.9'
   };
   let r;
