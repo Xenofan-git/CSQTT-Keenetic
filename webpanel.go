@@ -253,11 +253,16 @@ func csqttVKStatus(w http.ResponseWriter, r *http.Request) {
     token, _ := cfg["vk_access_token"].(string)
     userID, _ := cfg["vk_user_id"].(string)
     mode, _ := cfg["vk_hash_mode"].(string)
+    runtime := map[string]any{}
+    if b, err := os.ReadFile("/opt/etc/csqtt/vk-runtime.json"); err == nil {
+        _ = json.Unmarshal(b, &runtime)
+    }
     writeJSON(w, map[string]any{
         "ok": true,
         "authorized": strings.TrimSpace(token) != "",
         "user_id": userID,
         "mode": mode,
+        "runtime": runtime,
     })
 }
 
@@ -328,7 +333,7 @@ small{color:#999}.row{display:flex;gap:10px;flex-wrap:wrap}
 code{word-break:break-all;color:#9ecbff}
 </style></head><body>
 <h1>CSQTT-Keenetic</h1>
-<div class="card"><div class="status">VK: <span id="vk" class="warn">проверка…</span></div><div id="uid" class="muted"></div></div>
+<div class="card"><div class="status">VK: <span id="vk" class="warn">проверка…</span></div><div id="uid" class="muted"></div><div id="autoState" class="muted" style="margin-top:10px"></div></div>
 <div class="card">
 <h2>Авторизация VK</h2>
 <p class="muted">Авторизация выполняется через отдельный CSQTT VK Auth WebView по схеме LaLune. URL и токен вручную вставлять не нужно.</p>
@@ -408,6 +413,14 @@ async function refresh(){
   document.getElementById('vk').textContent=x.authorized?'🟢 Авторизован':'🔴 Не авторизован';
   document.getElementById('vk').className=x.authorized?'ok':'warn';
   document.getElementById('uid').textContent=x.user_id?'VK ID: '+x.user_id:'';
+  const rt=x.runtime||{};
+  const labels={starting:'Запуск manager…',getting_hashes:'Получаю VK hashes…',hashes_received:'Hashes получены',client_started:'Запускаю CSQTT…',client_stopped:'CSQTT остановлен',idle:'Ожидание',error:'Ошибка'};
+  let st=labels[rt.stage]||rt.stage||'Ожидание';
+  if(rt.stage==='getting_hashes' && rt.calls_requested) st+=' ('+Number(rt.calls_created||0)+'/'+Number(rt.calls_requested)+')';
+  if(rt.stage==='hashes_received') st+=': '+Number(rt.hashes_received||0);
+  if(rt.client_started) st+=' ✓';
+  if(rt.error) st+=' — '+rt.error;
+  document.getElementById('autoState').textContent='Auto VK: '+st;
   document.querySelectorAll('input[name=hashMode]').forEach(e=>e.checked=e.value===x.mode);
   modeChanged();
 }
