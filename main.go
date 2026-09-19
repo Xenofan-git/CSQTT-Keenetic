@@ -314,6 +314,11 @@ func waitForTUNCONF(lines <-chan string, timeout time.Duration) (string, error) 
     }
 }
 
+func waitForManagerShutdown(ctx context.Context, reason string) {
+    log.Printf("manager remains alive for web panel: %s", reason)
+    <-ctx.Done()
+}
+
 func main() {
     configPath := flag.String("config", "/opt/etc/csqtt/config.json", "config JSON")
     flag.Parse()
@@ -325,15 +330,20 @@ func main() {
     var autoCallIDs []string
     if c.VKHashMode == "auto_api" {
         c.VKHashes, autoCallIDs, err = resolveAutoAPI(c)
-        if err != nil { log.Fatalf("Auto API: %v", err) }
+        if err != nil {
+            waitForManagerShutdown(ctx, fmt.Sprintf("Auto API: %v", err))
+            return
+        }
         c.VKHashMode = "manual"
     } else if c.VKHashMode == "auto_js" {
         if strings.TrimSpace(resolveAutoAPIToken(c)) == "" {
-            log.Fatalf("Auto VK: VK authorization/access token is required")
+            waitForManagerShutdown(ctx, "Auto VK: VK authorization/access token is required")
+            return
         }
         c.VKAuthMode = "auto_js"
     } else if c.VKHashMode == "manual" && len(c.VKHashes) == 0 {
-        log.Fatalf("manual vk_hash_mode requires at least one vk_hash")
+        waitForManagerShutdown(ctx, "manual vk_hash_mode requires at least one vk_hash")
+        return
     }
     // Start the Rust client before creating the TUN FD. The upstream Android
     // client follows the same lifecycle: the Rust client first binds the persistent
@@ -420,7 +430,15 @@ func main() {
     if err := configureTUN(clientIP); err != nil { _ = cmd.Process.Kill(); log.Fatalf("configure TUN: %v", err) }
     log.Printf("TUN configured: %s %s/32 mtu=%d", tunName, clientIP, tunMTU)
     err = <-clientDone
-    if err != nil { log.Printf("client exited: %v", err) } else { log.Printf("client exited cleanly") }
+    if err != nil {
+        log.Printf("client exited: %v", err)
+    } else {
+        log.Printf("client exited cleanly")
+    }
+    // Keep the manager process alive when the client exits. The web panel is
+    // needed to refresh VK OAuth credentials and change mode; the watchdog
+    // must not mistake a failed VK/client session for a dead management plane.
+    waitForManagerShutdown(ctx, "client session ended; waiting for configuration/restart")
     if len(autoCallIDs) > 0 {
         token := strings.TrimSpace(c.VKAccessToken)
         if token == "" { token = strings.TrimSpace(os.Getenv("CSQTT_VK_ACCESS_TOKEN")) }
