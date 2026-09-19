@@ -36,7 +36,7 @@ func init() {
 func startCSQTTWebPanel() {
     mux := http.NewServeMux()
     mux.HandleFunc("/", csqttPanel)
-    mux.HandleFunc("/api/vk/token", csqttSaveVKToken)
+    mux.HandleFunc("/api/vk/token", csqttVKCallback)
     mux.HandleFunc("/api/vk/session", csqttVKSession)
     mux.HandleFunc("/api/vk/oauth-url", csqttVKOAuthURL)
     mux.HandleFunc("/api/vk/status", csqttVKStatus)
