@@ -1,6 +1,6 @@
 {
   "client": "/opt/etc/csqtt/client",
-  "peer": "72.56.81.131:46000",
+  "peer": "72.56.81.131:46010",
   "password": "YOUR_TUNNEL_PASSWORD",
   "vk_access_token": "",
   "vk_hashes": [],
