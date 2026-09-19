@@ -6,6 +6,8 @@ on:
     paths:
       - 'main.go'
       - 'webpanel.go'
+      - 'deploy.go'
+      - 'config.example.json'
       - 'go.mod'
       - '.github/workflows/build-manager-run41.yml'
 
