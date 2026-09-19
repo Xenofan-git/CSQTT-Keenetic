@@ -63,9 +63,8 @@ jobs:
         run: |
           set -euo pipefail
           python3 scripts/add-dispatch-diagnostic.py
-          grep -q '\[CSQTT DEBUG\] DISPATCH DROP' csqtt-2.1.9/rust-client/dispatcher.rs
-          grep -q '\[CSQTT DEBUG\] worker registered' csqtt-2.1.9/rust-client/dispatcher.rs
-          grep -q '\[CSQTT DEBUG\] DISPATCH queued' csqtt-2.1.9/rust-client/dispatcher.rs
+          grep -q '\[TUN DEBUG\] read_tun task started' csqtt-2.1.9/rust-client/dispatcher.rs
+          grep -q '\[TUN DEBUG\] libc::read returned' csqtt-2.1.9/rust-client/dispatcher.rs
 
       - name: Patch musl UDP and ARM64 compatibility
         working-directory: csqtt-2.1.9/rust-client
@@ -134,11 +133,9 @@ jobs:
           grep -q 'ScmRights' tun.rs
           grep -q 'UnixAddr::new_abstract' tun.rs
           grep -q 'MSG_NOSIGNAL' tun.rs
-          grep -q '\[CSQTT DEBUG\] worker registered' dispatcher.rs
-          grep -q '\[CSQTT DEBUG\] worker unregistered' dispatcher.rs
-          grep -q '\[CSQTT DEBUG\] DISPATCH DROP' dispatcher.rs
-          grep -q '\[CSQTT DEBUG\] DISPATCH queued' dispatcher.rs
-          echo 'TUN receiver and data-plane dispatcher diagnostics: OK'
+          grep -q '\[TUN DEBUG\] read_tun task started' dispatcher.rs
+          grep -q '\[TUN DEBUG\] libc::read returned' dispatcher.rs
+          echo 'TUN receiver diagnostics: OK'
 
       - name: Package
         run: |
