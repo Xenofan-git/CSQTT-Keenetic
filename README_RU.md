@@ -18,12 +18,27 @@ Linux/Entware-менеджер для существующего нативно�
 - использует ту же логику количества Auto API calls, что Android CSQTT 2.1.9;
 - поддерживает `vk_access_token` в конфиге или переменную окружения `CSQTT_VK_ACCESS_TOKEN`.
 
+## Deploy сервера из Web Panel
+
+Панель умеет разворачивать отдельный CSQTT Server на VPS без ручной установки.
+
+- существующий Android CSQTT endpoint не изменяется;
+- для Keenetic по умолчанию используется отдельный UDP 46010;
+- WEB-панель сервера по умолчанию 46012/tcp;
+- панель определяет архитектуру VPS (amd64, arm64, armv7);
+- скачивает официальный CSQTT-universal.apk нужной версии и извлекает из него тот же deploy.sh и Linux server binary, которые используются Android-приложением;
+- передаёт их на VPS по SSH/SCP;
+- запускает официальный systemd deploy/redeploy с проверкой TUN, NAT, firewall, порта и стабильности сервиса;
+- после успешного deploy может автоматически переключить локальный Keenetic client на новый host:46010.
+
+Пароли SSH/VPS не сохраняются в конфигурацию CSQTT; они используются только во время операции deploy.
+
 ## Что пока НЕ делает
 
 - не меняет default route;
 - не делает policy routing;
 - не включает весь LAN в туннель;
-- не реализует Web Panel;
+- не реализует полноценную авторизацию Web Panel;
 - не реализует полноценный VK OAuth/WebView login на роутере;
 - не реализует CAPTCHA UI;
 - не реализует HydraRoute failover.
