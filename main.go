@@ -137,7 +137,7 @@ func configureTUN(ipaddr string) error {
     parsed := net.ParseIP(ipaddr)
     if parsed == nil || parsed.To4() == nil { return fmt.Errorf("server returned invalid IPv4 TUN address: %q", ipaddr) }
     if err := ip("link", "set", "dev", tunName, "mtu", fmt.Sprint(tunMTU)); err != nil { return err }
-    if err := ip("addr", "add", ipaddr+"/32", "dev", tunName); err != nil { return err }
+    if err := ip("addr", "replace", ipaddr+"/32", "dev", tunName); err != nil { return err }
     return ip("link", "set", "dev", tunName, "up")
 }
 
@@ -398,11 +398,12 @@ func main() {
     if err := loadOrCreateState(c.StateFile, &c); err != nil { log.Fatalf("state: %v", err) }
     ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
     defer stop()
+    managerVKHashMode := c.VKHashMode
 
     var autoCallIDs []string
     runtime := vkRuntimeState{Mode: c.VKHashMode, Stage: "starting"}
     writeVKRuntime(c, runtime)
-    if c.VKHashMode == "auto_api" {
+    if managerVKHashMode == "auto_api" {
         runtime.Stage = "getting_hashes"
         runtime.CallsRequested = autoCallCount(c.Workers)
         writeVKRuntime(c, runtime)
@@ -449,7 +450,8 @@ func main() {
     for {
         // Auto API is intentionally re-run on every recovery. The original
         // Android client uses one VK account/token and creates a fresh call set.
-        if c.VKHashMode == "auto_api" {
+        if managerVKHashMode == "auto_api" {
+            runtime.Mode = managerVKHashMode
             runtime.Stage = "getting_hashes"
             runtime.CallsRequested = autoCallCount(c.Workers)
             runtime.CallsCreated = 0
@@ -495,7 +497,7 @@ func main() {
         clientDone := make(chan error, 1)
         go func() { clientDone <- cmd.Wait() }()
 
-        if c.VKHashMode == "auto_js" {
+        if managerVKHashMode == "auto_js" {
             bootstrap, bootstrapErr := resolveAutoJSBootstrap(c)
             if bootstrapErr != nil { _ = cmd.Process.Kill(); <-clientDone; clientStdin.Close(); log.Fatalf("Auto VK bootstrap: %v", bootstrapErr) }
             if _, writeErr := io.WriteString(clientStdin, "VK_JS_BOOTSTRAP:"+bootstrap+"\\n"); writeErr != nil { _ = cmd.Process.Kill(); <-clientDone; clientStdin.Close(); log.Fatalf("Auto VK bootstrap write: %v", writeErr) }
@@ -584,7 +586,7 @@ func main() {
         clientStdin.Close()
         finishAutoCalls(autoCallIDs); autoCallIDs=nil
 
-        if c.VKHashMode == "manual" && len(unavailableManual) > 0 {
+        if managerVKHashMode == "manual" && len(unavailableManual) > 0 {
             filtered := make([]string,0,len(c.VKHashes))
             for _, h := range c.VKHashes { if !unavailableManual[h] { filtered=append(filtered,h) } }
             c.VKHashes=filtered
