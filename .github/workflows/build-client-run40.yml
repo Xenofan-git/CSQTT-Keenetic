@@ -141,10 +141,10 @@ jobs:
         working-directory: csqtt-2.1.9/rust-client
         run: |
           grep -q 'ScmRights' tun.rs
-          grep -q '\[CSQTT DEBUG\] DISPATCH queued' dispatcher.rs
-          grep -q 'TunWriteState::DropPacket' dispatcher.rs
-          grep -q '\[TUN DEBUG\] EINVAL' dispatcher.rs
-          grep -q '\[TUN DEBUG\] READ' dispatcher.rs
+          grep -q '\[TUN DEBUG\] read_tun task started' dispatcher.rs
+          grep -q '\[PATH DEBUG\] dispatch len=' dispatcher.rs
+          grep -q '\[PATH DEBUG\] write_tun' dispatcher.rs
+          grep -q '\[PATH DEBUG\] writer sent=' session.rs
 
       - name: Package
         run: |
