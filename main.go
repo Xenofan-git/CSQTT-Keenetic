@@ -596,5 +596,6 @@ func main() {
         // Return to the top: Auto API gets a new call/hash set; Auto JS gets a
         // fresh bootstrap session; manual mode reuses only still-valid hashes.
     }
+}
 
 // Verified ARM64 Entware build path.
