@@ -142,9 +142,10 @@ jobs:
         run: |
           grep -q 'ScmRights' tun.rs
           grep -q '\[TUN DEBUG\] read_tun task started' dispatcher.rs
-          grep -q '\[PATH DEBUG\] dispatch len=' dispatcher.rs
-          grep -q '\[PATH DEBUG\] write_tun' dispatcher.rs
-          grep -q '\[PATH DEBUG\] writer sent=' session.rs
+          grep -q 'TunWriteState::DropPacket' dispatcher.rs
+          grep -q '\[TUN DEBUG\] EINVAL' dispatcher.rs
+          grep -q '\[TUN DEBUG\] READ len=' dispatcher.rs
+          grep -q 'CSQ5_MAGIC' ../shared/flow_frame.rs
 
       - name: Package
         run: |
