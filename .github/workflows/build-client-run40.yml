@@ -58,6 +58,12 @@ jobs:
 
       - name: Add dispatcher diagnostics
         run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('scripts/add-dispatch-diagnostic.py')
+          s = p.read_text()
+          p.write_text(s.replace('csqtt-current', 'csqtt-2.1.9'))
+          PY
           python3 scripts/add-dispatch-diagnostic.py
           grep -q '\[CSQTT DEBUG\] DISPATCH queued' csqtt-2.1.9/rust-client/dispatcher.rs
 
