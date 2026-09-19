@@ -466,3 +466,5 @@ func main() {
     }
     _ = ip("link", "set", "dev", tunName, "down")
 }
+
+// Verified ARM64 Entware build path.
