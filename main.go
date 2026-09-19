@@ -327,6 +327,9 @@ func main() {
     if err != nil { log.Fatalf("config: %v", err) }
     if c.Peer == "" || c.Password == "" { log.Fatalf("config requires peer and password") }
     if err := loadOrCreateState(c.StateFile, &c); err != nil { log.Fatalf("state: %v", err) }
+    ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+    defer stop()
+
     var autoCallIDs []string
     if c.VKHashMode == "auto_api" {
         c.VKHashes, autoCallIDs, err = resolveAutoAPI(c)
@@ -349,8 +352,6 @@ func main() {
     // client follows the same lifecycle: the Rust client first binds the persistent
     // UDS receiver, then VpnService creates the TUN and passes its FD. This avoids
     // making TUN creation part of the UDS startup race.
-    ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-    defer stop()
     cmd := exec.CommandContext(ctx, c.Client, buildClientArgs(c)...)
     cmd.Env = append(os.Environ(), "CSQTT_EVENTS=1")
     cmd.Stderr = os.Stderr
