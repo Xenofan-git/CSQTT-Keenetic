@@ -6,6 +6,7 @@ import (
     "fmt"
     "html/template"
     "log"
+    "net"
     "net/http"
     "net/url"
     "os"
@@ -203,7 +204,20 @@ func csqttVKStatus(w http.ResponseWriter, r *http.Request) {
     })
 }
 
+func panelClientIsPrivate(r *http.Request) bool {
+    host, _, err := net.SplitHostPort(r.RemoteAddr)
+    if err != nil {
+        host = r.RemoteAddr
+    }
+    ip := net.ParseIP(host)
+    return ip != nil && (ip.IsLoopback() || ip.IsPrivate())
+}
+
 func csqttDeployServer(w http.ResponseWriter, r *http.Request) {
+    if !panelClientIsPrivate(r) {
+        http.Error(w, "deploy доступен только из LAN/VPN", http.StatusForbidden)
+        return
+    }
     if r.Method != http.MethodPost {
         http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
         return
