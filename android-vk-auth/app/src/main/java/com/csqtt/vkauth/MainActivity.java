@@ -41,7 +41,8 @@ public class MainActivity extends Activity {
     private int pass;
     private boolean finished;
     private final Handler handler = new Handler(Looper.getMainLooper());
-    private Runnable timeout;\n    private Runnable poller;
+    private Runnable timeout;
+    private Runnable poller;
 
     @Override protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
