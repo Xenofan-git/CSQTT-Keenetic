@@ -1,6 +1,9 @@
 from pathlib import Path
 
-p = Path("csqtt-current/rust-client/dispatcher.rs")
+candidates = [Path("csqtt-current/rust-client/dispatcher.rs"), Path("csqtt-2.1.9/rust-client/dispatcher.rs")]
+p = next((x for x in candidates if x.exists()), None)
+if p is None:
+    raise SystemExit("dispatcher.rs not found in csqtt-current or csqtt-2.1.9")
 s = p.read_text()
 
 start = s.index("    async fn read_tun(")
@@ -92,4 +95,3 @@ section = section.replace(old, new, 1)
 p.write_text(s[:start] + section + s[end:])
 print("TUN read diagnostics inserted")
 
-# Trigger build-client-current after workflow-only fixes
