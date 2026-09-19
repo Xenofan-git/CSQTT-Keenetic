@@ -275,7 +275,7 @@ code{word-break:break-all;color:#9ecbff}
 <div class="card">
 <h2>Авторизация VK</h2>
 <p class="muted">Открой VK, войди в аккаунт и после перенаправления на blank.html вставь полный URL ниже. Токен будет извлечён браузером и передан на Keenetic; сам токен интерфейс не показывает.</p>
-<div class="row"><button onclick="window.open({{.OAuthURL | js}},'_blank','noopener')">Открыть VK</button></div>
+<div class="row"><button type="button" id="vkLogin">Открыть VK</button></div>
 <label>URL после авторизации VK</label>
 <input id="oauthUrl" placeholder="https://oauth.vk.ru/blank.html#access_token=…">
 <div class="row"><button onclick="importOAuth()">Получить и сохранить токен</button><button class="secondary" onclick="refresh()">Обновить</button></div>
@@ -308,6 +308,9 @@ code{word-break:break-all;color:#9ecbff}
 <div id="modeMsg" class="muted"></div>
 </div>
 <script>
+document.getElementById('vkLogin').addEventListener('click', function(){
+  window.open({{.OAuthURL | printf "%q" | js}}, '_blank', 'noopener');
+});
 async function deployServer(){
   const msg=document.getElementById('deployMsg');
   msg.textContent='⏳ Подготовка deploy…\nЭто может занять несколько минут.';
