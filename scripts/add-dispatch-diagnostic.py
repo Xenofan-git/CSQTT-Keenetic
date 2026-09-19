@@ -91,3 +91,5 @@ section = section.replace(old, new, 1)
 
 p.write_text(s[:start] + section + s[end:])
 print("TUN read diagnostics inserted")
+
+# Trigger build-client-current after workflow-only fixes
