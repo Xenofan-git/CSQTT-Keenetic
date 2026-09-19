@@ -50,16 +50,31 @@ func startCSQTTWebPanel() {
     }
 }
 
-func vkOAuthURL() string {
+func vkCallbackURL(r *http.Request) string {
+    scheme := "http"
+    if strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") || r.TLS != nil {
+        scheme = "https"
+    }
+    return scheme + "://" + strings.TrimSpace(r.Host) + "/api/vk/token"
+}
+
+func vkOAuthURLFor(r *http.Request, state string) string {
     q := url.Values{}
     q.Set("client_id", vkWebAppID)
     q.Set("scope", vkWebScope)
-    q.Set("redirect_uri", vkWebRedirect)
+    q.Set("redirect_uri", vkCallbackURL(r))
     q.Set("display", "page")
     q.Set("response_type", "token")
     q.Set("revoke", "1")
     q.Set("v", vkWebVersion)
+    if strings.TrimSpace(state) != "" {
+        q.Set("state", strings.TrimSpace(state))
+    }
     return "https://oauth.vk.ru/authorize?" + q.Encode()
+}
+
+func vkOAuthURL() string {
+    return vkOAuthURLFor(&http.Request{Host: "127.0.0.1:2001"}, "")
 }
 
 func csqttVKOAuthURL(w http.ResponseWriter, r *http.Request) {
@@ -67,7 +82,7 @@ func csqttVKOAuthURL(w http.ResponseWriter, r *http.Request) {
         http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
         return
     }
-    writeJSON(w, map[string]any{"ok": true, "url": vkOAuthURL()})
+    writeJSON(w, map[string]any{"ok": true, "url": vkOAuthURLFor(r, r.URL.Query().Get("state"))})
 }
 
 func csqttVKSession(w http.ResponseWriter, r *http.Request) {
@@ -132,6 +147,15 @@ func csqttPanel(w http.ResponseWriter, r *http.Request) {
     }{OAuthURL: vkOAuthURL()}
     w.Header().Set("Content-Type", "text/html; charset=utf-8")
     _ = csqttPanelTemplate.Execute(w, data)
+}
+
+func csqttVKCallback(w http.ResponseWriter, r *http.Request) {
+    if r.Method == http.MethodGet {
+        w.Header().Set("Content-Type", "text/html; charset=utf-8")
+        _, _ = w.Write([]byte(vkCallbackHTML))
+        return
+    }
+    csqttSaveVKToken(w, r)
 }
 
 func csqttSaveVKToken(w http.ResponseWriter, r *http.Request) {
@@ -336,7 +360,7 @@ code{word-break:break-all;color:#9ecbff}
 <div class="card"><div class="status">VK: <span id="vk" class="warn">проверка…</span></div><div id="uid" class="muted"></div><div id="autoState" class="muted" style="margin-top:10px"></div></div>
 <div class="card">
 <h2>Авторизация VK</h2>
-<p class="muted">Авторизация выполняется через отдельный CSQTT VK Auth WebView по схеме LaLune. URL и токен вручную вставлять не нужно.</p>
+<p class="muted">Авторизация выполняется непосредственно в браузере. После входа VK возвращает access_token во фрагмент redirect-URL, а эта страница автоматически передаёт его в CSQTT.</p>
 <div class="row"><button type="button" id="vkLogin">🔐 Войти через VK</button><button class="secondary" onclick="refresh()">Обновить</button></div>
 <div id="msg" class="muted"></div>
 </div>
@@ -373,12 +397,12 @@ document.getElementById('vkLogin').addEventListener('click', async function(){
     const r=await fetch('/api/vk/session');
     const x=await r.json();
     if(!x.ok || !x.state) throw new Error(x.error||'Сеанс авторизации не создан');
-    const callback=location.origin+'/api/vk/token';
-    const deeplink='csqtt-vk://login?callback='+encodeURIComponent(callback)+'&state='+encodeURIComponent(x.state);
-    msg.textContent='Открываю CSQTT VK Auth…';
-    window.location.href=deeplink;
+    const u=await fetch('/api/vk/oauth-url?state='+encodeURIComponent(x.state)).then(r=>r.json());
+    if(!u.ok || !u.url) throw new Error(u.error||'VK OAuth URL не создан');
+    msg.textContent='Открываю VK…';
+    window.location.href=u.url;
   }catch(e){
-    msg.textContent='Не удалось запустить VK Auth: '+e.message;
+    msg.textContent='Не удалось запустить VK: '+e.message;
   }
 });
 async function deployServer(){
@@ -440,3 +464,5 @@ refresh();
 </script></body></html>`))
 
 var _ = fmt.Sprintf
+
+const vkCallbackHTML = `<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>CSQTT VK</title><style>body{font-family:system-ui,sans-serif;background:#111;color:#eee;max-width:640px;margin:40px auto;padding:24px}.ok{color:#67e8a5}.err{color:#ff7777}</style></head><body><h2 id="title">VK авторизация</h2><p id="msg">Получаю access token…</p><script>(async function(){const msg=document.getElementById('msg');try{const p=new URLSearchParams(location.hash.replace(/^#/,''));const token=p.get('access_token')||'';const userId=p.get('user_id')||'';const expires=p.get('expires_in')||'0';const state=p.get('state')||'';const error=p.get('error');if(error)throw new Error(error+(p.get('error_description')?': '+p.get('error_description'):''));if(!token)throw new Error('VK не вернул access_token. Проверь redirect_uri в настройках VK приложения.');msg.textContent='Token получен. Передаю его в CSQTT…';const r=await fetch(location.pathname,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:token,user_id:userId,expires_in:Number(expires)||0,state:state})});const x=await r.json().catch(()=>({}));if(!r.ok||!x.ok)throw new Error(x.error||('HTTP '+r.status));document.getElementById('title').className='ok';document.getElementById('title').textContent='VK авторизация успешна ✓';msg.textContent='Token сохранён. CSQTT перезапускается и получает VK hashes автоматически.';}catch(e){document.getElementById('title').className='err';msg.className='err';msg.textContent='Ошибка: '+e.message;}})();</script></body></html>`;
