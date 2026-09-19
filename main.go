@@ -51,6 +51,7 @@ type Config struct {
     Salt          string   `json:"salt"`
     CaptchaMode   string   `json:"captcha_mode"`
     StateFile     string   `json:"state_file"`
+    AllowHashRedistribution bool `json:"allow_hash_redistribution"`
 }
 
 func defaults(c *Config) {
@@ -310,8 +311,31 @@ func resolveAutoJSBootstrap(c Config) (string, error) {
 func buildClientArgs(c Config) []string {
     args := []string{"-peer", c.Peer, "-n", fmt.Sprint(c.Workers), "-tun-uds", udsName, "-vk-hash-mode", c.VKHashMode, "-obfs", c.Obfs, "-turn-transport", c.TurnTransport, "-vk-auth-mode", c.VKAuthMode, "-device-id", c.DeviceID, "-password", c.Password, "-gen", fmt.Sprint(c.Generation), "-salt", c.Salt, "-fingerprint", c.Fingerprint, "-captcha-mode", c.CaptchaMode}
     if c.ClientIDs != "" { args = append(args, "-client-ids", c.ClientIDs) }
+    if c.AllowHashRedistribution { args = append(args, "-allow-hash-redistribution") }
     if len(c.VKHashes) > 0 { args = append(args, "-vk", strings.Join(c.VKHashes, ",")) }
     return args
+}
+
+type clientEvent struct {
+    Kind string
+    Hash string
+    Code int
+    Active int
+}
+
+func parseClientEvent(line string) (clientEvent, bool) {
+    const prefix = "__CSQTT_EVENT__|"
+    if !strings.HasPrefix(line, prefix) { return clientEvent{}, false }
+    rest := strings.TrimPrefix(line, prefix)
+    p := strings.IndexByte(rest, '|')
+    if p < 0 { return clientEvent{}, false }
+    var payload struct {
+        Hash string `json:"hash"`
+        Code int `json:"code"`
+        Active int `json:"active"`
+    }
+    if err := json.Unmarshal([]byte(rest[p+1:]), &payload); err != nil { return clientEvent{}, false }
+    return clientEvent{Kind: rest[:p], Hash: strings.TrimSpace(payload.Hash), Code: payload.Code, Active: payload.Active}, true
 }
 
 func waitForTUNCONF(lines <-chan string, timeout time.Duration) (string, error) {
@@ -394,6 +418,7 @@ func main() {
         runtime.CallsCreated = len(autoCallIDs)
         runtime.HashesReceived = len(c.VKHashes)
         writeVKRuntime(c, runtime)
+        c.AllowHashRedistribution = len(autoCallIDs) < runtime.CallsRequested
         c.VKHashMode = "manual"
     } else if c.VKHashMode == "auto_js" {
         if strings.TrimSpace(resolveAutoAPIToken(c)) == "" {
@@ -405,136 +430,169 @@ func main() {
         waitForManagerShutdown(ctx, "manual vk_hash_mode requires at least one vk_hash")
         return
     }
-    // Start the Rust client before creating the TUN FD. The upstream Android
-    // client follows the same lifecycle: the Rust client first binds the persistent
-    // UDS receiver, then VpnService creates the TUN and passes its FD. This avoids
-    // making TUN creation part of the UDS startup race.
-    cmd := exec.CommandContext(ctx, c.Client, buildClientArgs(c)...)
-    cmd.Env = append(os.Environ(), "CSQTT_EVENTS=1")
-    cmd.Stderr = os.Stderr
-    // Keep the client's control stdin open. With CSQTT_EVENTS=1 the Rust
-    // client treats stdin EOF as a shutdown signal; exec.Cmd otherwise gives
-    // it a closed/null stdin and it immediately cancels before the TUN FD arrives.
-    clientStdin, err := cmd.StdinPipe()
-    if err != nil { log.Fatalf("stdin pipe: %v", err) }
-    // Keep this writer alive for the whole client lifetime; closing it would
-    // intentionally produce EOF and stop the Rust client's control task.
-    defer clientStdin.Close()
-    stdout, err := cmd.StdoutPipe()
-    if err != nil { log.Fatalf("stdout pipe: %v", err) }
-    if err := cmd.Start(); err != nil {
-        runtime.Stage = "error"
-        runtime.Error = fmt.Sprintf("start client: %v", err)
-        writeVKRuntime(c, runtime)
-        log.Fatalf("start client: %v", err)
-    }
-    runtime.Stage = "client_started"
-    runtime.ClientStarted = true
-    runtime.ClientRunning = true
-    writeVKRuntime(c, runtime)
-    log.Printf("client started pid=%d", cmd.Process.Pid)
-    clientDone := make(chan error, 1)
-    go func() { clientDone <- cmd.Wait() }()
-    if c.VKHashMode == "auto_js" {
-        bootstrap, bootstrapErr := resolveAutoJSBootstrap(c)
-        if bootstrapErr != nil {
-            _ = cmd.Process.Kill()
-            <-clientDone
-            log.Fatalf("Auto VK bootstrap: %v", bootstrapErr)
-        }
-        if _, writeErr := io.WriteString(clientStdin, "VK_JS_BOOTSTRAP:"+bootstrap+"\n"); writeErr != nil {
-            _ = cmd.Process.Kill()
-            <-clientDone
-            log.Fatalf("Auto VK bootstrap write: %v", writeErr)
-        }
-        log.Printf("Auto VK: bootstrap передан Rust-клиенту")
-    }
-    lines := make(chan string, 128)
-    go func() {
-        defer close(lines)
-        s := bufio.NewScanner(stdout)
-        s.Buffer(make([]byte, 4096), 1024*1024)
-        for s.Scan() {
-            line := s.Text()
-            log.Printf("CLIENT %s", line)
-            select { case lines <- line: case <-ctx.Done(): return }
-        }
-        if err := s.Err(); err != nil { log.Printf("client stdout: %v", err) }
-    }()
-    // The client owns the persistent UDS receiver. Wait/retry here exactly
-    // like the Android VpnService does, then pass the already-created TUN FD.
+    // Keep one TUN device across transport rebuilds. This mirrors the Android
+    // TunnelManager/TunnelService recovery path while keeping the router TUN alive.
     tun, err := createTUN(tunName)
-    if err != nil {
-        _ = cmd.Process.Kill()
-        <-clientDone
-        log.Fatalf("TUN: %v", err)
-    }
+    if err != nil { log.Fatalf("TUN: %v", err) }
     defer tun.Close()
     log.Printf("TUN created: %s fd=%d mtu=%d", tunName, tun.Fd(), tunMTU)
 
-    var sent bool
-    for i := 0; i < 600 && !sent; i++ {
-        if err := sendFD(udsName, tun, 3*time.Second); err == nil {
-            sent = true
-            log.Printf("TUN FD accepted by client")
-            break
-        } else {
-            log.Printf("waiting for client UDS: %v", err)
+    finishAutoCalls := func(callIDs []string) {
+        if len(callIDs) == 0 { return }
+        token := resolveAutoAPIToken(c)
+        for _, callID := range callIDs {
+            if err := vkFinishCall(token, callID); err != nil { log.Printf("VK Auto API: finish %s: %v", callID, err) }
+        }
+    }
+
+    unavailableManual := map[string]bool{}
+    for {
+        // Auto API is intentionally re-run on every recovery. The original
+        // Android client uses one VK account/token and creates a fresh call set.
+        if c.VKHashMode == "auto_api" {
+            runtime.Stage = "getting_hashes"
+            runtime.CallsRequested = autoCallCount(c.Workers)
+            runtime.CallsCreated = 0
+            runtime.HashesReceived = 0
+            runtime.Error = ""
+            writeVKRuntime(c, runtime)
+            var callErr error
+            c.VKHashes, autoCallIDs, callErr = resolveAutoAPI(c)
+            if callErr != nil {
+                runtime.Stage = "error"
+                runtime.Error = callErr.Error()
+                writeVKRuntime(c, runtime)
+                waitForManagerShutdown(ctx, fmt.Sprintf("Auto API: %v", callErr))
+                return
+            }
+            runtime.Stage = "hashes_received"
+            runtime.CallsCreated = len(autoCallIDs)
+            runtime.HashesReceived = len(c.VKHashes)
+            c.AllowHashRedistribution = len(autoCallIDs) < runtime.CallsRequested
+            writeVKRuntime(c, runtime)
+            c.VKHashMode = "manual"
+        }
+
+        cmd := exec.CommandContext(ctx, c.Client, buildClientArgs(c)...)
+        cmd.Env = append(os.Environ(), "CSQTT_EVENTS=1")
+        cmd.Stderr = os.Stderr
+        clientStdin, err := cmd.StdinPipe()
+        if err != nil { log.Fatalf("stdin pipe: %v", err) }
+        stdout, err := cmd.StdoutPipe()
+        if err != nil { clientStdin.Close(); log.Fatalf("stdout pipe: %v", err) }
+        if err := cmd.Start(); err != nil {
+            clientStdin.Close()
+            runtime.Stage = "error"
+            runtime.Error = fmt.Sprintf("start client: %v", err)
+            writeVKRuntime(c, runtime)
+            log.Fatalf("start client: %v", err)
+        }
+        runtime.Stage = "client_started"
+        runtime.ClientStarted = true
+        runtime.ClientRunning = true
+        writeVKRuntime(c, runtime)
+        log.Printf("client started pid=%d", cmd.Process.Pid)
+        clientDone := make(chan error, 1)
+        go func() { clientDone <- cmd.Wait() }()
+
+        if c.VKHashMode == "auto_js" {
+            bootstrap, bootstrapErr := resolveAutoJSBootstrap(c)
+            if bootstrapErr != nil { _ = cmd.Process.Kill(); <-clientDone; clientStdin.Close(); log.Fatalf("Auto VK bootstrap: %v", bootstrapErr) }
+            if _, writeErr := io.WriteString(clientStdin, "VK_JS_BOOTSTRAP:"+bootstrap+"\\n"); writeErr != nil { _ = cmd.Process.Kill(); <-clientDone; clientStdin.Close(); log.Fatalf("Auto VK bootstrap write: %v", writeErr) }
+            log.Printf("Auto VK: bootstrap передан Rust-клиенту")
+        }
+
+        lines := make(chan string, 128)
+        events := make(chan clientEvent, 64)
+        go func() {
+            defer close(lines); defer close(events)
+            scanner := bufio.NewScanner(stdout)
+            scanner.Buffer(make([]byte, 4096), 1024*1024)
+            for scanner.Scan() {
+                line := scanner.Text()
+                log.Printf("CLIENT %s", line)
+                if ev, ok := parseClientEvent(line); ok { select { case events <- ev: default: } }
+                select { case lines <- line: case <-ctx.Done(): return }
+            }
+            if err := scanner.Err(); err != nil { log.Printf("client stdout: %v", err) }
+        }()
+
+        var sent bool
+        for i := 0; i < 600 && !sent; i++ {
+            if err := sendFD(udsName, tun, 3*time.Second); err == nil { sent = true; log.Printf("TUN FD accepted by client"); break }
+            log.Printf("waiting for client UDS")
             select {
             case err := <-clientDone:
                 log.Printf("client exited before TUN FD transfer: %v", err)
+                finishAutoCalls(autoCallIDs)
                 waitForManagerShutdown(ctx, "client exited before TUN FD transfer")
                 return
-            case <-ctx.Done(): return
-            // The Rust client exits quickly if the TUN FD never arrives.
-            // Retry almost immediately after a startup-time UDS refusal so we
-            // can catch the listener as soon as it is bound.
+            case <-ctx.Done(): _ = cmd.Process.Kill(); <-clientDone; return
             case <-time.After(50 * time.Millisecond):
             }
         }
-    }
-    if !sent {
-        _ = cmd.Process.Kill()
-        <-clientDone
-        waitForManagerShutdown(ctx, "could not pass TUN FD to client")
-        return
-    }
-    clientIP, err := waitForTUNCONF(lines, 30*time.Second)
-    if err != nil {
-        _ = cmd.Process.Kill()
-        waitForManagerShutdown(ctx, fmt.Sprintf("TUNCONF: %v", err))
-        return
-    }
-    log.Printf("server assigned TUN IP: %s", clientIP)
-    if err := configureTUN(clientIP); err != nil {
-        _ = cmd.Process.Kill()
-        waitForManagerShutdown(ctx, fmt.Sprintf("configure TUN: %v", err))
-        return
-    }
-    log.Printf("TUN configured: %s %s/32 mtu=%d", tunName, clientIP, tunMTU)
-    err = <-clientDone
-    runtime.ClientRunning = false
-    runtime.Stage = "client_stopped"
-    if err != nil {
-        runtime.Error = err.Error()
-        log.Printf("client exited: %v", err)
-    } else {
-        log.Printf("client exited cleanly")
-    }
-    // Always finish calls before entering the long-lived management wait.
-    if len(autoCallIDs) > 0 {
-        token := resolveAutoAPIToken(c)
-        for _, callID := range autoCallIDs {
-            if err := vkFinishCall(token, callID); err != nil {
-                log.Printf("VK Auto API: finish %s: %v", callID, err)
+        if !sent { _ = cmd.Process.Kill(); <-clientDone; finishAutoCalls(autoCallIDs); waitForManagerShutdown(ctx, "could not pass TUN FD to client"); return }
+
+        clientIP, err := waitForTUNCONF(lines, 30*time.Second)
+        if err != nil {
+            _ = cmd.Process.Kill(); <-clientDone; finishAutoCalls(autoCallIDs)
+            runtime.ClientRunning = false; runtime.Stage = "error"; runtime.Error = err.Error(); writeVKRuntime(c, runtime)
+            waitForManagerShutdown(ctx, fmt.Sprintf("TUNCONF: %v", err)); return
+        }
+        log.Printf("server assigned TUN IP: %s", clientIP)
+        if err := configureTUN(clientIP); err != nil { _ = cmd.Process.Kill(); <-clientDone; finishAutoCalls(autoCallIDs); waitForManagerShutdown(ctx, fmt.Sprintf("configure TUN: %v", err)); return }
+        log.Printf("TUN configured: %s %s/32 mtu=%d", tunName, clientIP, tunMTU)
+
+        recovery := make(chan string, 1)
+        var zeroTimer *time.Timer
+        var zeroC <-chan time.Time
+        activeWorkers := 0
+        sessionEnded := false
+        for !sessionEnded {
+            select {
+            case ev, ok := <-events:
+                if !ok { events = nil; continue }
+                switch ev.Kind {
+                case "CALL_UNAVAILABLE":
+                    if c.VKHashMode == "manual" && !c.AllowHashRedistribution {
+                        unavailableManual[ev.Hash] = true
+                        log.Printf("VK hash unavailable in manual mode: %s code=%d", ev.Hash, ev.Code)
+                    } else { select { case recovery <- "call_unavailable": default: } }
+                case "ACTIVE_ZERO":
+                    if zeroTimer == nil { zeroTimer = time.NewTimer(4*time.Second); zeroC = zeroTimer.C }
+                case "STATS":
+                    activeWorkers = ev.Active
+                    if activeWorkers > 0 && zeroTimer != nil { if !zeroTimer.Stop() { select { case <-zeroTimer.C: default: } }; zeroTimer=nil; zeroC=nil }
+                case "NETWORK_SUSPECT":
+                    select { case recovery <- "network_suspect": default: }
+                }
+            case <-zeroC:
+                if activeWorkers == 0 { select { case recovery <- "workers_zero_refresh": default: } }
+                zeroTimer=nil; zeroC=nil
+            case reason := <-recovery:
+                if reason != "" { sessionEnded=true; log.Printf("transport recovery requested: %s", reason) }
+            case err := <-clientDone:
+                runtime.ClientRunning=false; runtime.Stage="client_stopped"
+                if err != nil { runtime.Error=err.Error(); log.Printf("client exited: %v", err) } else { log.Printf("client exited cleanly") }
+                sessionEnded=true
+            case <-ctx.Done():
+                _=cmd.Process.Kill(); <-clientDone; clientStdin.Close(); finishAutoCalls(autoCallIDs); _=ip("link","set","dev",tunName,"down"); return
             }
         }
+        if zeroTimer != nil { if !zeroTimer.Stop() { select { case <-zeroTimer.C: default: } } }
+        select { case <-clientDone: default: _=cmd.Process.Kill(); <-clientDone }
+        clientStdin.Close()
+        finishAutoCalls(autoCallIDs); autoCallIDs=nil
+
+        if c.VKHashMode == "manual" && len(unavailableManual) > 0 {
+            filtered := make([]string,0,len(c.VKHashes))
+            for _, h := range c.VKHashes { if !unavailableManual[h] { filtered=append(filtered,h) } }
+            c.VKHashes=filtered
+            if len(c.VKHashes)==0 { runtime.Stage="error"; runtime.Error="all configured VK hashes are unavailable"; writeVKRuntime(c,runtime); _=ip("link","set","dev",tunName,"down"); waitForManagerShutdown(ctx,runtime.Error); return }
+        }
+        runtime.Stage="restarting"; runtime.ClientRunning=false; writeVKRuntime(c,runtime)
+        // Return to the top: Auto API gets a new call/hash set; Auto JS gets a
+        // fresh bootstrap session; manual mode reuses only still-valid hashes.
     }
-    runtime.Stage = "idle"
-    writeVKRuntime(c, runtime)
-    _ = ip("link", "set", "dev", tunName, "down")
-    // Keep the management plane alive after cleanup.
-    waitForManagerShutdown(ctx, "client session ended; waiting for configuration/restart")
-}
 
 // Verified ARM64 Entware build path.
