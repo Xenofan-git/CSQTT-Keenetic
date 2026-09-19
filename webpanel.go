@@ -275,7 +275,7 @@ code{word-break:break-all;color:#9ecbff}
 <div class="card">
 <h2>Авторизация VK</h2>
 <p class="muted">Открой VK, войди в аккаунт и после перенаправления на blank.html вставь полный URL ниже. Токен будет извлечён браузером и передан на Keenetic; сам токен интерфейс не показывает.</p>
-<div class="row"><button onclick="window.open({{printf "%q" .OAuthURL}},'_blank','noopener')">Открыть VK</button></div>
+<div class="row"><button onclick="window.open({{.OAuthURL | js}},'_blank','noopener')">Открыть VK</button></div>
 <label>URL после авторизации VK</label>
 <input id="oauthUrl" placeholder="https://oauth.vk.ru/blank.html#access_token=…">
 <div class="row"><button onclick="importOAuth()">Получить и сохранить токен</button><button class="secondary" onclick="refresh()">Обновить</button></div>
