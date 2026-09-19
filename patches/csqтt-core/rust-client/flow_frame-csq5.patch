@@ -25,11 +25,11 @@ diff --git a/shared/flow_frame.rs b/shared/flow_frame.rs
 +                &packet[FRAME_LEN..],
 +            ));
 +        }
-+        // CSQTT 2.2.x WIRE-3 server framing: CSQ5 + version(u32) +
++        // CSQTT 2.2.x WIRE-3 server framing: CSQ5 + version(u32 LE) +
 +        // sender_id(u32) + flow_id(u64) + sequence(u32).
 +        const CSQ5_MAGIC: [u8; 4] = [0xc5, b'S', b'Q', b'5'];
 +        if packet[..4] == CSQ5_MAGIC
-+            && u32::from_be_bytes(packet[4..8].try_into().ok()?) == 1
++            && u32::from_le_bytes(packet[4..8].try_into().ok()?) == 1
 +        {
 +            return Some((
 +                Self {
