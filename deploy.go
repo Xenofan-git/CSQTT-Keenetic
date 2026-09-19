@@ -259,6 +259,7 @@ func deployServer(ctx context.Context, r DeployRequest, progress func(string)) (
     script := filepath.Join(work, "deploy.sh")
     binary := filepath.Join(work, "csqtt-server")
     apk := filepath.Join(work, "CSQTT-universal.apk")
+    var asset deployAsset
     envFile := filepath.Join(work, "csqtt.env")
     overrides := filepath.Join(work, "deploy-overrides.json")
     if progress != nil { progress("Загрузка официального CSQTT Android release…") }
