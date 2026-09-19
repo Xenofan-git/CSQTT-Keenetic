@@ -50,6 +50,9 @@ jobs:
           grep -q '\[TUN FD\] ACK' csqtt-current/rust-client/tun.rs
           python3 scripts/add-dispatch-diagnostic.py
           grep -q '\[TUN DEBUG\] read_tun task started' csqtt-current/rust-client/dispatcher.rs
+          python3 scripts/add-runtime-diagnostic.py
+          grep -q '\[TUN FD\] received fd=' csqtt-current/rust-client/tun.rs
+          grep -q '\[PATH DEBUG\] writer sent=' csqtt-current/rust-client/session.rs
 
 
       - name: Patch musl UDP and ARM64 compatibility
