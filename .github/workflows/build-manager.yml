@@ -55,3 +55,5 @@ jobs:
             dist/CSQTT-Keenetic
             CSQTT-Keenetic-aarch64-k3.10.tar.gz
             dist/SHA256SUMS
+
+# Manual verification trigger: ARM64 Entware manager build.
