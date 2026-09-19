@@ -2,6 +2,7 @@ package main
 
 import (
     "bufio"
+    "encoding/base64"
     "context"
     "crypto/rand"
     "encoding/hex"
@@ -273,6 +274,20 @@ func resolveAutoAPI(c Config) ([]string, []string, error) {
     return hashes, callIDs, nil
 }
 
+func resolveAutoJSBootstrap(c Config) (string, error) {
+    token := resolveAutoAPIToken(c)
+    if token == "" {
+        return "", fmt.Errorf("vk_hash_mode=auto_js requires VK authorization/access token")
+    }
+    payload, err := json.Marshal(struct {
+        Token string `json:"token"`
+    }{Token: token})
+    if err != nil {
+        return "", fmt.Errorf("encode Auto VK bootstrap: %w", err)
+    }
+    return base64.StdEncoding.EncodeToString(payload), nil
+}
+
 func buildClientArgs(c Config) []string {
     args := []string{"-peer", c.Peer, "-n", fmt.Sprint(c.Workers), "-tun-uds", udsName, "-vk-hash-mode", c.VKHashMode, "-obfs", c.Obfs, "-turn-transport", c.TurnTransport, "-vk-auth-mode", c.VKAuthMode, "-device-id", c.DeviceID, "-password", c.Password, "-gen", fmt.Sprint(c.Generation), "-salt", c.Salt, "-fingerprint", c.Fingerprint, "-captcha-mode", c.CaptchaMode}
     if c.ClientIDs != "" { args = append(args, "-client-ids", c.ClientIDs) }
@@ -312,6 +327,11 @@ func main() {
         c.VKHashes, autoCallIDs, err = resolveAutoAPI(c)
         if err != nil { log.Fatalf("Auto API: %v", err) }
         c.VKHashMode = "manual"
+    } else if c.VKHashMode == "auto_js" {
+        if strings.TrimSpace(resolveAutoAPIToken(c)) == "" {
+            log.Fatalf("Auto VK: VK authorization/access token is required")
+        }
+        c.VKAuthMode = "auto_js"
     } else if c.VKHashMode == "manual" && len(c.VKHashes) == 0 {
         log.Fatalf("manual vk_hash_mode requires at least one vk_hash")
     }
@@ -335,6 +355,20 @@ func main() {
     stdout, err := cmd.StdoutPipe()
     if err != nil { log.Fatalf("stdout pipe: %v", err) }
     if err := cmd.Start(); err != nil { log.Fatalf("start client: %v", err) }
+    if c.VKHashMode == "auto_js" {
+        bootstrap, bootstrapErr := resolveAutoJSBootstrap(c)
+        if bootstrapErr != nil {
+            _ = cmd.Process.Kill()
+            <-clientDone
+            log.Fatalf("Auto VK bootstrap: %v", bootstrapErr)
+        }
+        if _, writeErr := io.WriteString(clientStdin, "VK_JS_BOOTSTRAP:"+bootstrap+"\\n"); writeErr != nil {
+            _ = cmd.Process.Kill()
+            <-clientDone
+            log.Fatalf("Auto VK bootstrap write: %v", writeErr)
+        }
+        log.Printf("Auto VK: bootstrap передан Rust-клиенту")
+    }
     log.Printf("client started pid=%d", cmd.Process.Pid)
     clientDone := make(chan error, 1)
     go func() { clientDone <- cmd.Wait() }()
