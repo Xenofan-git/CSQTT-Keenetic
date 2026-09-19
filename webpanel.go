@@ -12,6 +12,7 @@ import (
     "net/http"
     "net/url"
     "os"
+    "strconv"
     "strings"
     "time"
     "sync"
@@ -62,7 +63,7 @@ func vkOAuthURLFor(r *http.Request, state string) string {
     q := url.Values{}
     q.Set("client_id", vkWebAppID)
     q.Set("scope", vkWebScope)
-    q.Set("redirect_uri", vkCallbackURL(r))
+    q.Set("redirect_uri", vkWebRedirect)
     q.Set("display", "page")
     q.Set("response_type", "token")
     q.Set("revoke", "1")
@@ -96,7 +97,13 @@ func csqttVKSession(w http.ResponseWriter, r *http.Request) {
         http.Error(w, "cannot create auth state", http.StatusInternalServerError)
         return
     }
-    state := base64.RawURLEncoding.EncodeToString(b)
+    nonce := base64.RawURLEncoding.EncodeToString(b)
+    scheme := "http"
+    if strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") || r.TLS != nil {
+        scheme = "https"
+    }
+    statePayload := scheme + "://" + strings.TrimSpace(r.Host) + "|" + nonce
+    state := base64.RawURLEncoding.EncodeToString([]byte(statePayload))
 
     vkTokenMu.Lock()
     now := time.Now()
@@ -169,7 +176,17 @@ func csqttSaveVKToken(w http.ResponseWriter, r *http.Request) {
         ExpiresIn int64 `json:"expires_in"`
         State string `json:"state"`
     }
-    if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+    contentType := strings.ToLower(r.Header.Get("Content-Type"))
+    if strings.HasPrefix(contentType, "application/x-www-form-urlencoded") || strings.HasPrefix(contentType, "multipart/form-data") {
+        if err := r.ParseForm(); err != nil {
+            http.Error(w, "invalid form", http.StatusBadRequest)
+            return
+        }
+        req.Token = r.FormValue("token")
+        req.UserID = r.FormValue("user_id")
+        req.State = r.FormValue("state")
+        req.ExpiresIn, _ = strconv.ParseInt(r.FormValue("expires_in"), 10, 64)
+    } else if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
         http.Error(w, "invalid json", http.StatusBadRequest)
         return
     }
@@ -360,9 +377,18 @@ code{word-break:break-all;color:#9ecbff}
 <div class="card"><div class="status">VK: <span id="vk" class="warn">проверка…</span></div><div id="uid" class="muted"></div><div id="autoState" class="muted" style="margin-top:10px"></div></div>
 <div class="card">
 <h2>Авторизация VK</h2>
-<p class="muted">Авторизация выполняется непосредственно в браузере. После входа VK возвращает access_token во фрагмент redirect-URL, а эта страница автоматически передаёт его в CSQTT.</p>
+<p class="muted">VK-приложение 7793118 требует штатный redirect <code>https://oauth.vk.ru/blank.html</code>. После входа VK помещает access_token во фрагмент URL. Браузерный скрипт забирает его и передаёт в CSQTT — APK не нужен.</p>
 <div class="row"><button type="button" id="vkLogin">🔐 Войти через VK</button><button class="secondary" onclick="refresh()">Обновить</button></div>
 <div id="msg" class="muted"></div>
+<div style="margin-top:14px">
+  <details>
+    <summary>🧩 Скрипт автоматического получения токена</summary>
+    <p class="muted">Firefox Android: установи Violentmonkey и открой userscript ниже. Chrome Android: сохрани bookmarklet в закладку и запускай его из адресной строки на странице VK.</p>
+    <a href="/vk-auth.user.js" target="_blank">📥 Открыть userscript</a>
+    <textarea id="vkBookmarklet" readonly rows="4" style="width:100%;box-sizing:border-box;background:#101010;color:#9ecbff;border:1px solid #444;border-radius:10px;padding:11px;margin-top:10px"></textarea>
+    <small>Bookmarklet: скопируй код в URL закладки с именем «CSQTT VK».</small>
+  </details>
+</div>
 </div>
 <div class="card">
 <h2>🚀 Deploy CSQTT Server</h2>
@@ -399,7 +425,7 @@ document.getElementById('vkLogin').addEventListener('click', async function(){
     if(!x.ok || !x.state) throw new Error(x.error||'Сеанс авторизации не создан');
     const u=await fetch('/api/vk/oauth-url?state='+encodeURIComponent(x.state)).then(r=>r.json());
     if(!u.ok || !u.url) throw new Error(u.error||'VK OAuth URL не создан');
-    msg.textContent='Открываю VK…';
+    msg.textContent='Открываю VK… После авторизации скрипт на blank.html автоматически вернёт token в CSQTT.';
     window.location.href=u.url;
   }catch(e){
     msg.textContent='Не удалось запустить VK: '+e.message;
@@ -432,7 +458,14 @@ async function deployServer(){
   }catch(e){ msg.textContent='❌ Ошибка соединения с панелью: '+e; }
 }
 
+function updateVKBookmarklet(){
+  const out=document.getElementById('vkBookmarklet');
+  if(!out) return;
+  const code="javascript:(()=>{const p=new URLSearchParams(location.hash.slice(1));const t=p.get('access_token');const u=p.get('user_id')||'';const e=p.get('expires_in')||'0';const s=p.get('state')||'';if(!t||!s){alert('CSQTT VK: token/state не найден');return;}let d=s.replace(/-/g,'+').replace(/_/g,'/');while(d.length%4)d+='=';let raw='';try{raw=decodeURIComponent(escape(atob(d)))}catch(_){alert('CSQTT VK: неверный state');return;}const i=raw.indexOf('|');const panel=raw.slice(0,i);if(!panel){alert('CSQTT VK: panel URL не найден');return;}const f=document.createElement('form');f.method='POST';f.action=panel+'/api/vk/token';[['token',t],['user_id',u],['expires_in',e],['state',s]].forEach(([n,v])=>{const x=document.createElement('input');x.type='hidden';x.name=n;x.value=v;f.appendChild(x)});document.documentElement.appendChild(f);f.submit();})();";
+  out.value=code;
+}
 async function refresh(){
+  updateVKBookmarklet();
   let r=await fetch('/api/vk/status');let x=await r.json();
   document.getElementById('vk').textContent=x.authorized?'🟢 Авторизован':'🔴 Не авторизован';
   document.getElementById('vk').className=x.authorized?'ok':'warn';
