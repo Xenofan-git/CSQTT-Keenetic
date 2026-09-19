@@ -396,7 +396,7 @@ func main() {
     log.Printf("TUN created: %s fd=%d mtu=%d", tunName, tun.Fd(), tunMTU)
 
     var sent bool
-    for i := 0; i < 40 && !sent; i++ {
+    for i := 0; i < 600 && !sent; i++ {
         if err := sendFD(udsName, tun, 3*time.Second); err == nil {
             sent = true
             log.Printf("TUN FD accepted by client")
@@ -409,7 +409,7 @@ func main() {
             // The Rust client exits quickly if the TUN FD never arrives.
             // Retry almost immediately after a startup-time UDS refusal so we
             // can catch the listener as soon as it is bound.
-            case <-time.After(10 * time.Millisecond):
+            case <-time.After(50 * time.Millisecond):
             }
         }
     }
