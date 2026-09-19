@@ -30,7 +30,7 @@ public class MainActivity extends Activity {
     private static final String AUTH_URL = "https://oauth.vk.ru/authorize?client_id=7793118&scope=1073737727&redirect_uri=https%3A%2F%2Foauth.vk.ru%2Fblank.html&display=page&response_type=token&revoke=1&v=5.199";
     private static final String SCHEME = "csqtt-vk";
     private static final String HOST = "login";
-    private static final String BLANK_HOST = "oauth.vk.ru";
+    private static final String[] BLANK_HOSTS = {"oauth.vk.ru", "oauth.vk.com"};
     private static final String BLANK_PATH = "/blank.html";
     private static final long SESSION_TIMEOUT_MS = 5 * 60 * 1000L;
 
@@ -41,7 +41,7 @@ public class MainActivity extends Activity {
     private int pass;
     private boolean finished;
     private final Handler handler = new Handler(Looper.getMainLooper());
-    private Runnable timeout;
+    private Runnable timeout;\n    private Runnable poller;
 
     @Override protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -90,11 +90,11 @@ public class MainActivity extends Activity {
         webView.loadUrl(AUTH_URL);
     }
 
-    private boolean inspectUrl(String url) {
+    private boolean isBlankHost(String host) {\n        if (host == null) return false;\n        for (String h : BLANK_HOSTS) if (h.equalsIgnoreCase(host)) return true;\n        return false;\n    }\n\n    private void startPolling() {\n        if (poller != null) handler.removeCallbacks(poller);\n        poller = new Runnable() {\n            @Override public void run() {\n                if (finished || webView == null) return;\n                String url = webView.getUrl();\n                if (url != null) inspectUrl(url);\n                if (!finished) handler.postDelayed(this, 750L);\n            }\n        };\n        handler.postDelayed(poller, 750L);\n    }\n\n    private boolean inspectUrl(String url) {
         if (finished || url == null) return false;
         Uri u;
         try { u = Uri.parse(url); } catch (Exception e) { return false; }
-        if (!BLANK_HOST.equalsIgnoreCase(u.getHost()) || !BLANK_PATH.equalsIgnoreCase(u.getPath())) return false;
+        if (!isBlankHost(u.getHost()) || !BLANK_PATH.equalsIgnoreCase(u.getPath())) return false;
         String fragment = u.getEncodedFragment();
         if (fragment == null || fragment.isEmpty()) return true;
         String token = param(fragment, "access_token");
@@ -213,5 +213,5 @@ public class MainActivity extends Activity {
     }
 
     private void setStatus(String value) { if (status != null) status.setText(value); }
-    @Override protected void onDestroy() { if (timeout != null) handler.removeCallbacks(timeout); if (webView != null) webView.destroy(); super.onDestroy(); }
+    @Override protected void onDestroy() { if (timeout != null) handler.removeCallbacks(timeout); if (poller != null) handler.removeCallbacks(poller); if (webView != null) webView.destroy(); super.onDestroy(); }
 }
