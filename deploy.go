@@ -248,9 +248,7 @@ func deployServer(ctx context.Context, r DeployRequest, progress func(string)) (
     if progress != nil { progress("Проверка SSH и архитектуры VPS…") }
     arch, err := deployRemoteArch(ctx, r)
     if err != nil { return nil, err }
-    if progress != nil { progress("VPS: " + arch + ". Поиск server release…") }
-    asset, err := deployFindAsset(ctx, r.Version, arch)
-    if err != nil { return nil, err }
+    if progress != nil { progress("VPS: " + arch + ". Поиск официального Android release…") }
 
     id, err := deployRandomHex(16)
     if err != nil { return nil, err }
@@ -264,7 +262,7 @@ func deployServer(ctx context.Context, r DeployRequest, progress func(string)) (
     envFile := filepath.Join(work, "csqtt.env")
     overrides := filepath.Join(work, "deploy-overrides.json")
     if progress != nil { progress("Загрузка официального CSQTT Android release…") }
-    asset, err := deployFindUniversalAPK(ctx, r.Version)
+    asset, err = deployFindUniversalAPK(ctx, r.Version)
     if err != nil { return nil, err }
     if err := deployDownload(ctx, asset.URL, apk); err != nil { return nil, err }
     if progress != nil { progress("Извлечение deploy.sh и Linux server из APK…") }
