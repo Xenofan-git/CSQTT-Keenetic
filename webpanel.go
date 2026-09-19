@@ -403,7 +403,7 @@ code{word-break:break-all;color:#9ecbff}
 <div id="msg" class="muted"></div>
 <div style="margin-top:14px">
   <details>
-    <summary>🧩 Скрипт автоматического получения токена</summary>
+    <summary>🧩 Скрипт автоматического получения токена v1.2</summary>
     <p class="muted">Firefox Android: установи Violentmonkey и открой userscript ниже. Chrome Android: сохрани bookmarklet в закладку и запускай его из адресной строки на странице VK.</p>
     <a href="/vk-auth.user.js" target="_blank">📥 Открыть userscript</a>
     <textarea id="vkBookmarklet" readonly rows="4" style="width:100%;box-sizing:border-box;background:#101010;color:#9ecbff;border:1px solid #444;border-radius:10px;padding:11px;margin-top:10px"></textarea>
