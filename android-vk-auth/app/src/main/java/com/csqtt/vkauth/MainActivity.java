@@ -88,9 +88,29 @@ public class MainActivity extends Activity {
             @Override public void onPageFinished(WebView view, String url) { inspectUrl(url); }
         });
         webView.loadUrl(AUTH_URL);
+        startPolling();
     }
 
-    private boolean isBlankHost(String host) {\n        if (host == null) return false;\n        for (String h : BLANK_HOSTS) if (h.equalsIgnoreCase(host)) return true;\n        return false;\n    }\n\n    private void startPolling() {\n        if (poller != null) handler.removeCallbacks(poller);\n        poller = new Runnable() {\n            @Override public void run() {\n                if (finished || webView == null) return;\n                String url = webView.getUrl();\n                if (url != null) inspectUrl(url);\n                if (!finished) handler.postDelayed(this, 750L);\n            }\n        };\n        handler.postDelayed(poller, 750L);\n    }\n\n    private boolean inspectUrl(String url) {
+    private boolean isBlankHost(String host) {
+        if (host == null) return false;
+        for (String h : BLANK_HOSTS) if (h.equalsIgnoreCase(host)) return true;
+        return false;
+    }
+
+    private void startPolling() {
+        if (poller != null) handler.removeCallbacks(poller);
+        poller = new Runnable() {
+            @Override public void run() {
+                if (finished || webView == null) return;
+                String url = webView.getUrl();
+                if (url != null) inspectUrl(url);
+                if (!finished) handler.postDelayed(this, 750L);
+            }
+        };
+        handler.postDelayed(poller, 750L);
+    }
+
+    private boolean inspectUrl(String url) {
         if (finished || url == null) return false;
         Uri u;
         try { u = Uri.parse(url); } catch (Exception e) { return false; }
