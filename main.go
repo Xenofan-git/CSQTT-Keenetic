@@ -356,7 +356,7 @@ func writeVKRuntime(c Config, st vkRuntimeState) {
     b, err := json.MarshalIndent(st, "", "  ")
     if err != nil { return }
     tmp := vkRuntimePath + ".tmp"
-    if err := os.WriteFile(tmp, append(b, '\\n'), 0600); err == nil { _ = os.Rename(tmp, vkRuntimePath) }
+    if err := os.WriteFile(tmp, append(b, '\n'), 0600); err == nil { _ = os.Rename(tmp, vkRuntimePath) }
 }
 
 func waitForManagerShutdown(ctx context.Context, reason string) {
