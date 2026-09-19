@@ -31,6 +31,7 @@ func startCSQTTWebPanel() {
     mux.HandleFunc("/", csqttPanel)
     mux.HandleFunc("/api/vk/token", csqttSaveVKToken)
     mux.HandleFunc("/api/vk/status", csqttVKStatus)
+    mux.HandleFunc("/api/vk/mode", csqttSetVKMode)
     mux.HandleFunc("/api/config", csqttConfigStatus)
 
     log.Printf("CSQTT Web Panel listening on http://%s", csqttWebListen)
@@ -130,6 +131,58 @@ func csqttSaveVKToken(w http.ResponseWriter, r *http.Request) {
     writeJSON(w, map[string]any{"ok": true, "user_id": req.UserID})
 }
 
+func csqttSetVKMode(w http.ResponseWriter, r *http.Request) {
+    if r.Method != http.MethodPost {
+        http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+        return
+    }
+    var req struct {
+        Mode   string   `json:"mode"`
+        Hashes []string `json:"hashes"`
+    }
+    if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+        http.Error(w, "invalid json", http.StatusBadRequest)
+        return
+    }
+    mode := strings.ToLower(strings.TrimSpace(req.Mode))
+    if mode != "manual" && mode != "auto_api" && mode != "auto_js" {
+        http.Error(w, "invalid mode", http.StatusBadRequest)
+        return
+    }
+    hashes := make([]string, 0, len(req.Hashes))
+    for _, hash := range req.Hashes {
+        hash = strings.TrimSpace(hash)
+        if hash != "" {
+            hashes = append(hashes, hash)
+        }
+    }
+    if mode == "manual" && len(hashes) == 0 {
+        http.Error(w, "manual mode requires at least one hash", http.StatusBadRequest)
+        return
+    }
+
+    vkTokenMu.Lock()
+    defer vkTokenMu.Unlock()
+    cfg, err := readCSQTTConfig()
+    if err != nil {
+        http.Error(w, "cannot read config: "+err.Error(), http.StatusInternalServerError)
+        return
+    }
+    cfg["vk_hash_mode"] = mode
+    if mode == "auto_js" {
+        cfg["vk_auth_mode"] = "auto_js"
+    } else {
+        cfg["vk_auth_mode"] = "vkcalls"
+    }
+    cfg["vk_hashes"] = hashes
+    if err := writeCSQTTConfig(cfg); err != nil {
+        http.Error(w, "cannot save config: "+err.Error(), http.StatusInternalServerError)
+        return
+    }
+    log.Printf("CSQTT Web Panel: VK hash mode changed to %s", mode)
+    writeJSON(w, map[string]any{"ok": true, "mode": mode})
+}
+
 func csqttVKStatus(w http.ResponseWriter, r *http.Request) {
     cfg, err := readCSQTTConfig()
     if err != nil {
@@ -188,11 +241,42 @@ code{word-break:break-all;color:#9ecbff}
 <div class="row"><button onclick="importOAuth()">Получить и сохранить токен</button><button class="secondary" onclick="refresh()">Обновить</button></div>
 <div id="msg" class="muted"></div>
 </div>
-<div class="card"><h2>Hash режим</h2><div>Сейчас: <b id="mode">—</b></div><p class="muted">Поддерживаемые режимы: manual / auto_api / auto_js. Текущая разработка — auto_api.</p></div>
+<div class="card">
+<h2>Hash режим</h2>
+<p class="muted">Один авторизованный VK аккаунт используется для обоих автоматических режимов.</p>
+<label><input type="radio" name="hashMode" value="manual" onchange="modeChanged()"> Ручной — вставить VK hashes</label>
+<label><input type="radio" name="hashMode" value="auto_api" onchange="modeChanged()"> Авто API — calls.start</label>
+<label><input type="radio" name="hashMode" value="auto_js" onchange="modeChanged()"> Авто ВК — VK Calls / vchat</label>
+<div id="manualHashes" style="display:none">
+  <label>VK hashes (по одному на строку)</label>
+  <textarea id="hashes" rows="6" style="width:100%;box-sizing:border-box;background:#101010;color:#eee;border:1px solid #444;border-radius:10px;padding:11px"></textarea>
+</div>
+<div class="row"><button onclick="saveMode()">Сохранить режим</button></div>
+<div id="modeMsg" class="muted"></div>
+</div>
 <script>
-async function refresh(){let r=await fetch('/api/vk/status');let x=await r.json();document.getElementById('vk').textContent=x.authorized?'🟢 Авторизован':'🔴 Не авторизован';document.getElementById('vk').className=x.authorized?'ok':'warn';document.getElementById('uid').textContent=x.user_id?'VK ID: '+x.user_id:'';document.getElementById('mode').textContent=x.mode||'—'}
+async function refresh(){
+  let r=await fetch('/api/vk/status');let x=await r.json();
+  document.getElementById('vk').textContent=x.authorized?'🟢 Авторизован':'🔴 Не авторизован';
+  document.getElementById('vk').className=x.authorized?'ok':'warn';
+  document.getElementById('uid').textContent=x.user_id?'VK ID: '+x.user_id:'';
+  document.querySelectorAll('input[name=hashMode]').forEach(e=>e.checked=e.value===x.mode);
+  modeChanged();
+}
+function modeChanged(){
+  let m=document.querySelector('input[name=hashMode]:checked')?.value||'auto_api';
+  document.getElementById('manualHashes').style.display=m==='manual'?'block':'none';
+}
 function parseToken(s){try{let u=new URL(s);let p=new URLSearchParams(u.hash.replace(/^#/ ,''));return {token:p.get('access_token')||'',user_id:p.get('user_id')||'',expires_in:Number(p.get('expires_in')||0)}}catch(e){let p=new URLSearchParams((s.split('#')[1]||'').replace(/^#/ ,''));return {token:p.get('access_token')||'',user_id:p.get('user_id')||'',expires_in:Number(p.get('expires_in')||0)}}}
-async function importOAuth(){let v=parseToken(document.getElementById('oauthUrl').value.trim());if(!v.token){document.getElementById('msg').textContent='Не найден access_token в URL';return}let r=await fetch('/api/vk/token',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(v)});let x=await r.json();document.getElementById('msg').textContent=x.ok?'Токен сохранён. Auto API готов к запуску.':'Ошибка: '+(x.error||'unknown');if(x.ok)refresh()}
+async function importOAuth(){let v=parseToken(document.getElementById('oauthUrl').value.trim());if(!v.token){document.getElementById('msg').textContent='Не найден access_token в URL';return}let r=await fetch('/api/vk/token',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(v)});let x=await r.json();document.getElementById('msg').textContent=x.ok?'Токен сохранён. Теперь можно выбрать Auto API или Auto ВК.':'Ошибка: '+(x.error||'unknown');if(x.ok)refresh()}
+async function saveMode(){
+  let mode=document.querySelector('input[name=hashMode]:checked')?.value||'auto_api';
+  let hashes=mode==='manual'?document.getElementById('hashes').value.split(/\\r?\\n/).map(x=>x.trim()).filter(Boolean):[];
+  let r=await fetch('/api/vk/mode',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:mode,hashes:hashes})});
+  let x=await r.json();
+  document.getElementById('modeMsg').textContent=x.ok?'Режим сохранён: '+x.mode:'Ошибка: '+(x.error||'unknown');
+  if(x.ok)refresh();
+}
 refresh();
 </script></body></html>`))
 
