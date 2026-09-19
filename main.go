@@ -183,6 +183,25 @@ type vkStartedCall struct { CallID string; Hash string }
 type vkAPIError struct { Code int `json:"error_code"`; Msg string `json:"error_msg"` }
 type vkResponse struct { Response struct { CallID string `json:"call_id"`; Hash string `json:"ok_join_link"`; Join string `json:"join_link"` } `json:"response"`; Error *vkAPIError `json:"error"` }
 
+func extractVKHash(okJoinLink, joinLink string) (string, error) {
+    candidates := []string{strings.TrimSpace(okJoinLink), strings.TrimSpace(joinLink)}
+    for _, raw := range candidates {
+        if raw == "" { continue }
+        if u, err := url.Parse(raw); err == nil {
+            if q := strings.TrimSpace(u.Query().Get("call_link")); q != "" { return q, nil }
+            if q := strings.TrimSpace(u.Query().Get("join_link")); q != "" { return q, nil }
+            if u.Path != "" && u.Path != "/" {
+                p := strings.Trim(strings.TrimSpace(u.Path), "/")
+                if p != "" && !strings.ContainsAny(p, "?=&") { return p, nil }
+            }
+        }
+        value := strings.Trim(strings.TrimSpace(raw), "/")
+        if idx := strings.IndexByte(value, '?'); idx >= 0 { value = value[:idx] }
+        if value != "" && !strings.ContainsAny(value, "=&?") { return value, nil }
+    }
+    return "", fmt.Errorf("VK calls.start returned unusable join link/hash")
+}
+
 func vkStartCall(token string) (vkStartedCall, *vkAPIError, error) {
     form := url.Values{}
     form.Set("v", vkAPIVersion)
@@ -197,10 +216,9 @@ func vkStartCall(token string) (vkStartedCall, *vkAPIError, error) {
     var out vkResponse
     if err := json.NewDecoder(resp.Body).Decode(&out); err != nil { return vkStartedCall{}, nil, err }
     if out.Error != nil { return vkStartedCall{}, out.Error, nil }
-    hash := strings.TrimSpace(out.Response.Hash)
-    if hash == "" { hash = strings.Trim(strings.TrimSpace(out.Response.Join), "/") }
-    if idx := strings.LastIndex(hash, "/"); idx >= 0 { hash = hash[idx+1:] }
-    if out.Response.CallID == "" || hash == "" { return vkStartedCall{}, nil, fmt.Errorf("VK calls.start returned empty call_id/hash") }
+    if out.Response.CallID == "" { return vkStartedCall{}, nil, fmt.Errorf("VK calls.start returned empty call_id") }
+    hash, err := extractVKHash(out.Response.Hash, out.Response.Join)
+    if err != nil { return vkStartedCall{}, nil, err }
     return vkStartedCall{CallID: out.Response.CallID, Hash: hash}, nil, nil
 }
 
@@ -315,6 +333,32 @@ func waitForTUNCONF(lines <-chan string, timeout time.Duration) (string, error) 
     }
 }
 
+type vkRuntimeState struct {
+    Authorized bool `json:"authorized"`
+    Mode string `json:"mode"`
+    Stage string `json:"stage"`
+    CallsRequested int `json:"calls_requested"`
+    CallsCreated int `json:"calls_created"`
+    HashesReceived int `json:"hashes_received"`
+    ClientStarted bool `json:"client_started"`
+    ClientRunning bool `json:"client_running"`
+    Error string `json:"error,omitempty"`
+    UpdatedAt string `json:"updated_at"`
+}
+
+const vkRuntimePath = "/opt/etc/csqtt/vk-runtime.json"
+
+func writeVKRuntime(c Config, st vkRuntimeState) {
+    token := strings.TrimSpace(c.VKAccessToken)
+    st.Authorized = token != ""
+    if st.Mode == "" { st.Mode = c.VKHashMode }
+    st.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+    b, err := json.MarshalIndent(st, "", "  ")
+    if err != nil { return }
+    tmp := vkRuntimePath + ".tmp"
+    if err := os.WriteFile(tmp, append(b, '\\n'), 0600); err == nil { _ = os.Rename(tmp, vkRuntimePath) }
+}
+
 func waitForManagerShutdown(ctx context.Context, reason string) {
     log.Printf("manager remains alive for web panel: %s", reason)
     <-ctx.Done()
@@ -332,12 +376,24 @@ func main() {
     defer stop()
 
     var autoCallIDs []string
+    runtime := vkRuntimeState{Mode: c.VKHashMode, Stage: "starting"}
+    writeVKRuntime(c, runtime)
     if c.VKHashMode == "auto_api" {
+        runtime.Stage = "getting_hashes"
+        runtime.CallsRequested = autoCallCount(c.Workers)
+        writeVKRuntime(c, runtime)
         c.VKHashes, autoCallIDs, err = resolveAutoAPI(c)
         if err != nil {
+            runtime.Stage = "error"
+            runtime.Error = err.Error()
+            writeVKRuntime(c, runtime)
             waitForManagerShutdown(ctx, fmt.Sprintf("Auto API: %v", err))
             return
         }
+        runtime.Stage = "hashes_received"
+        runtime.CallsCreated = len(autoCallIDs)
+        runtime.HashesReceived = len(c.VKHashes)
+        writeVKRuntime(c, runtime)
         c.VKHashMode = "manual"
     } else if c.VKHashMode == "auto_js" {
         if strings.TrimSpace(resolveAutoAPIToken(c)) == "" {
@@ -366,7 +422,16 @@ func main() {
     defer clientStdin.Close()
     stdout, err := cmd.StdoutPipe()
     if err != nil { log.Fatalf("stdout pipe: %v", err) }
-    if err := cmd.Start(); err != nil { log.Fatalf("start client: %v", err) }
+    if err := cmd.Start(); err != nil {
+        runtime.Stage = "error"
+        runtime.Error = fmt.Sprintf("start client: %v", err)
+        writeVKRuntime(c, runtime)
+        log.Fatalf("start client: %v", err)
+    }
+    runtime.Stage = "client_started"
+    runtime.ClientStarted = true
+    runtime.ClientRunning = true
+    writeVKRuntime(c, runtime)
     log.Printf("client started pid=%d", cmd.Process.Pid)
     clientDone := make(chan error, 1)
     go func() { clientDone <- cmd.Wait() }()
@@ -448,23 +513,28 @@ func main() {
     }
     log.Printf("TUN configured: %s %s/32 mtu=%d", tunName, clientIP, tunMTU)
     err = <-clientDone
+    runtime.ClientRunning = false
+    runtime.Stage = "client_stopped"
     if err != nil {
+        runtime.Error = err.Error()
         log.Printf("client exited: %v", err)
     } else {
         log.Printf("client exited cleanly")
     }
-    // Keep the manager process alive when the client exits. The web panel is
-    // needed to refresh VK OAuth credentials and change mode; the watchdog
-    // must not mistake a failed VK/client session for a dead management plane.
-    waitForManagerShutdown(ctx, "client session ended; waiting for configuration/restart")
+    // Always finish calls before entering the long-lived management wait.
     if len(autoCallIDs) > 0 {
-        token := strings.TrimSpace(c.VKAccessToken)
-        if token == "" { token = strings.TrimSpace(os.Getenv("CSQTT_VK_ACCESS_TOKEN")) }
+        token := resolveAutoAPIToken(c)
         for _, callID := range autoCallIDs {
-            if err := vkFinishCall(token, callID); err != nil { log.Printf("VK Auto API: finish %s: %v", callID, err) }
+            if err := vkFinishCall(token, callID); err != nil {
+                log.Printf("VK Auto API: finish %s: %v", callID, err)
+            }
         }
     }
+    runtime.Stage = "idle"
+    writeVKRuntime(c, runtime)
     _ = ip("link", "set", "dev", tunName, "down")
+    // Keep the management plane alive after cleanup.
+    waitForManagerShutdown(ctx, "client session ended; waiting for configuration/restart")
 }
 
 // Verified ARM64 Entware build path.
