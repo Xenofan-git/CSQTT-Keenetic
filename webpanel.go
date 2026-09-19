@@ -8,6 +8,7 @@ import (
     "encoding/json"
     "fmt"
     "html/template"
+    "io"
     "log"
     "net"
     "net/http"
@@ -24,7 +25,7 @@ const (
     csqttWebListen = "0.0.0.0:2001"
     vkWebAppID = "7793118"
     vkWebScope = "1073737727"
-    vkWebRedirect = "https://oauth.vk.ru/blank.html"
+    vkWebRedirect = "http://192.168.1.1:2001/api/vk/callback"
     vkWebVersion = "5.199"
 )
 
@@ -43,6 +44,7 @@ func startCSQTTWebPanel() {
     mux.HandleFunc("/", csqttPanel)
     mux.HandleFunc("/vk-auth.user.js", csqttVKUserScript)
     mux.HandleFunc("/api/vk/token", csqttVKCallback)
+    mux.HandleFunc("/api/vk/callback", csqttVKOAuthCallback)
     mux.HandleFunc("/api/vk/session", csqttVKSession)
     mux.HandleFunc("/api/vk/oauth-url", csqttVKOAuthURL)
     mux.HandleFunc("/api/vk/status", csqttVKStatus)
@@ -68,9 +70,9 @@ func vkOAuthURLFor(r *http.Request, state string) string {
     q := url.Values{}
     q.Set("client_id", vkWebAppID)
     q.Set("scope", vkWebScope)
-    q.Set("redirect_uri", vkWebRedirect)
+    q.Set("redirect_uri", vkOAuthRedirect(r))
     q.Set("display", "page")
-    q.Set("response_type", "token")
+    q.Set("response_type", "code")
     q.Set("revoke", "1")
     q.Set("v", vkWebVersion)
     if strings.TrimSpace(state) != "" {
@@ -89,6 +91,109 @@ func csqttVKOAuthURL(w http.ResponseWriter, r *http.Request) {
         return
     }
     writeJSON(w, map[string]any{"ok": true, "url": vkOAuthURLFor(r, r.URL.Query().Get("state"))})
+}
+
+func vkOAuthRedirect(r *http.Request) string {
+    if cfg, err := readCSQTTConfig(); err == nil {
+        if v, ok := cfg["vk_oauth_redirect"].(string); ok && strings.TrimSpace(v) != "" {
+            return strings.TrimSpace(v)
+        }
+    }
+    return vkWebRedirect
+}
+
+func csqttVKOAuthCallback(w http.ResponseWriter, r *http.Request) {
+    if r.Method != http.MethodGet {
+        http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+        return
+    }
+    code := strings.TrimSpace(r.URL.Query().Get("code"))
+    state := strings.TrimSpace(r.URL.Query().Get("state"))
+    if errText := strings.TrimSpace(r.URL.Query().Get("error")); errText != "" {
+        http.Error(w, "VK authorization error: "+errText, http.StatusBadRequest)
+        return
+    }
+    if code == "" {
+        http.Error(w, "VK did not return authorization code", http.StatusBadRequest)
+        return
+    }
+
+    vkTokenMu.Lock()
+    expiry, ok := vkAuthStates[state]
+    if !ok || expiry.Before(time.Now()) {
+        vkTokenMu.Unlock()
+        http.Error(w, "invalid or expired auth state", http.StatusForbidden)
+        return
+    }
+    delete(vkAuthStates, state)
+    vkTokenMu.Unlock()
+
+    cfg, err := readCSQTTConfig()
+    if err != nil {
+        http.Error(w, "cannot read config: "+err.Error(), http.StatusInternalServerError)
+        return
+    }
+    clientSecret, _ := cfg["vk_client_secret"].(string)
+    clientSecret = strings.TrimSpace(clientSecret)
+    if clientSecret == "" {
+        http.Error(w, "vk_client_secret is not configured", http.StatusInternalServerError)
+        return
+    }
+
+    form := url.Values{}
+    form.Set("client_id", vkWebAppID)
+    form.Set("client_secret", clientSecret)
+    form.Set("redirect_uri", vkOAuthRedirect(r))
+    form.Set("code", code)
+
+    req, err := http.NewRequest(http.MethodPost, "https://oauth.vk.com/access_token", strings.NewReader(form.Encode()))
+    if err != nil {
+        http.Error(w, "cannot create VK token request: "+err.Error(), http.StatusInternalServerError)
+        return
+    }
+    req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+    resp, err := http.DefaultClient.Do(req)
+    if err != nil {
+        http.Error(w, "VK token exchange failed: "+err.Error(), http.StatusBadGateway)
+        return
+    }
+    defer resp.Body.Close()
+
+    var tokenResp struct {
+        AccessToken string `json:"access_token"`
+        UserID any `json:"user_id"`
+        ExpiresIn int64 `json:"expires_in"`
+        Error string `json:"error"`
+        ErrorDescription string `json:"error_description"`
+    }
+    if err := json.NewDecoder(resp.Body).Decode(&tokenResp); err != nil {
+        http.Error(w, "invalid VK token response", http.StatusBadGateway)
+        return
+    }
+    if tokenResp.AccessToken == "" {
+        msg := tokenResp.ErrorDescription
+        if msg == "" { msg = tokenResp.Error }
+        if msg == "" { msg = "access_token missing" }
+        http.Error(w, "VK token exchange failed: "+msg, http.StatusBadGateway)
+        return
+    }
+
+    cfg["vk_access_token"] = tokenResp.AccessToken
+    cfg["vk_user_id"] = fmt.Sprint(tokenResp.UserID)
+    cfg["vk_token_expires_in"] = tokenResp.ExpiresIn
+    if _, ok := cfg["vk_hash_mode"]; !ok { cfg["vk_hash_mode"] = "auto_api" }
+    if err := writeCSQTTConfig(cfg); err != nil {
+        http.Error(w, "cannot save config: "+err.Error(), http.StatusInternalServerError)
+        return
+    }
+
+    w.Header().Set("Content-Type", "text/html; charset=utf-8")
+    _, _ = io.WriteString(w, "<!doctype html><html lang='ru'><meta charset='utf-8'><title>CSQTT VK</title><body style='font-family:system-ui;background:#111;color:#eee;padding:32px'><h2 style='color:#67e8a5'>VK авторизация успешна ✓</h2><p>Токен получен и сохранён на Keenetic. Перезапускаю CSQTT…</p></body></html>")
+
+    go func() {
+        time.Sleep(700 * time.Millisecond)
+        _ = syscall.Kill(os.Getpid(), syscall.SIGTERM)
+    }()
 }
 
 func csqttVKSession(w http.ResponseWriter, r *http.Request) {
