@@ -1,48 +1,75 @@
 // ==UserScript==
 // @name         CSQTT-Keenetic VK Auto Auth
 // @namespace    https://github.com/Xenofan-git/CSQTT-Keenetic
-// @version      1.0.0
-// @description  Automatically returns VK implicit OAuth token from blank.html to CSQTT-Keenetic.
+// @version      1.1.0
+// @description  Automatically captures VK implicit OAuth URL on blank.html and sends the token to CSQTT-Keenetic.
 // @match        https://oauth.vk.ru/blank.html*
 // @match        https://oauth.vk.com/blank.html*
 // @run-at       document-start
+// @grant        none
 // ==/UserScript==
 
 (() => {
-  const p = new URLSearchParams(location.hash.replace(/^#/, ""));
-  const token = p.get("access_token") || "";
-  const userId = p.get("user_id") || "";
-  const expiresIn = p.get("expires_in") || "0";
-  const state = p.get("state") || "";
-  if (!token || !state) return;
+  "use strict";
 
-  let encoded = state.replace(/-/g, "+").replace(/_/g, "/");
-  while (encoded.length % 4) encoded += "=";
+  // VK implicit OAuth returns access_token in the URL fragment.
+  // A normal page on another origin cannot read that fragment, so this
+  // userscript must run on VK's blank.html page.
+  const params = new URLSearchParams(location.hash.replace(/^#/, ""));
+  const token = params.get("access_token") || "";
+  const userId = params.get("user_id") || "";
+  const expiresIn = params.get("expires_in") || "0";
+  const state = params.get("state") || "";
+  const error = params.get("error") || "";
 
-  let raw;
+  if (error) {
+    document.documentElement.innerHTML =
+      "<body style='font-family:system-ui;padding:24px;background:#111;color:#eee'>" +
+      "<h2 style='color:#ff7777'>CSQTT VK: ошибка авторизации</h2><p>" +
+      String(params.get("error_description") || error).replace(/[<>&]/g, "") +
+      "</p></body>";
+    return;
+  }
+
+  if (!token || !state) {
+    // This can also be a normal visit to blank.html. Do nothing.
+    return;
+  }
+
+  function decodeBase64Url(value) {
+    let s = value.replace(/-/g, "+").replace(/_/g, "/");
+    while (s.length % 4) s += "=";
+    const bytes = Uint8Array.from(atob(s), ch => ch.charCodeAt(0));
+    return new TextDecoder().decode(bytes);
+  }
+
+  let rawState;
   try {
-    raw = decodeURIComponent(escape(atob(encoded)));
+    rawState = decodeBase64Url(state);
   } catch (_) {
     return;
   }
 
-  const separator = raw.indexOf("|");
+  const separator = rawState.indexOf("|");
   if (separator <= 0) return;
 
-  const panel = raw.slice(0, separator);
+  const panel = rawState.slice(0, separator);
   if (!/^https?:\/\//i.test(panel)) return;
 
+  // Use a real form POST so no CORS permission is required.
   const form = document.createElement("form");
   form.method = "POST";
-  form.action = panel + "/api/vk/token";
+  form.action = panel.replace(/\/$/, "") + "/api/vk/token";
   form.style.display = "none";
 
-  for (const [name, value] of [
-    ["token", token],
-    ["user_id", userId],
-    ["expires_in", expiresIn],
-    ["state", state],
-  ]) {
+  const fields = {
+    token,
+    user_id: userId,
+    expires_in: expiresIn,
+    state,
+  };
+
+  for (const [name, value] of Object.entries(fields)) {
     const input = document.createElement("input");
     input.type = "hidden";
     input.name = name;
