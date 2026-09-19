@@ -15,6 +15,7 @@ import (
     "strings"
     "time"
     "sync"
+    "syscall"
 )
 
 const (
@@ -181,7 +182,14 @@ func csqttSaveVKToken(w http.ResponseWriter, r *http.Request) {
         return
     }
     log.Printf("CSQTT Web Panel: VK access token saved for user %s", req.UserID)
-    writeJSON(w, map[string]any{"ok": true, "user_id": req.UserID})
+    writeJSON(w, map[string]any{"ok": true, "user_id": req.UserID, "restart_pending": true})
+
+    // The web panel lives in the manager process. Restart it after the response so
+    // the freshly saved token is consumed immediately by the normal startup path.
+    go func() {
+        time.Sleep(700 * time.Millisecond)
+        _ = syscall.Kill(os.Getpid(), syscall.SIGTERM)
+    }()
 }
 
 func csqttSetVKMode(w http.ResponseWriter, r *http.Request) {
