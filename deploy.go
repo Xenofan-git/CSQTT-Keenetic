@@ -35,6 +35,7 @@ type DeployRequest struct {
     WebUser    string `json:"web_user"`
     WebPass    string `json:"web_pass"`
     ServerPass string `json:"server_password"`
+    UseForRouter bool `json:"use_for_router"`
     Version    string `json:"version"`
 }
 
@@ -280,11 +281,24 @@ func deployServer(ctx context.Context, r DeployRequest, progress func(string)) (
     if !strings.Contains(string(out), "CSQTT_DEPLOY_OK") {
         return nil, fmt.Errorf("deploy не подтвердил успешный запуск: %s", strings.TrimSpace(string(out)))
     }
+    if r.UseForRouter {
+        cfg, cfgErr := readCSQTTConfig()
+        if cfgErr == nil {
+            cfg["peer"] = fmt.Sprintf("%s:%d", r.Host, r.PeerPort)
+            cfg["password"] = r.ServerPass
+            if cfgErr = writeCSQTTConfig(cfg); cfgErr != nil {
+                return nil, fmt.Errorf("сервер установлен, но не удалось переключить локальный CSQTT config: %w", cfgErr)
+            }
+        } else {
+            return nil, fmt.Errorf("сервер установлен, но не удалось прочитать локальный CSQTT config: %w", cfgErr)
+        }
+        if progress != nil { progress("Локальный Keenetic client переключён на новый сервер") }
+    }
     if progress != nil { progress("Сервер CSQTT успешно установлен") }
     return map[string]any{
         "ok": true, "version": r.Version, "arch": arch, "peer_port": r.PeerPort, "web_port": r.WebPort,
         "server": r.Host, "web_user": r.WebUser, "server_password": r.ServerPass,
-        "asset": asset.Name,
+        "use_for_router": r.UseForRouter, "asset": asset.Name,
     }, nil
 }
 
