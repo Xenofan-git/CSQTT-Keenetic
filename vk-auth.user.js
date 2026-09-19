@@ -1,11 +1,12 @@
 // ==UserScript==
 // @name         CSQTT-Keenetic VK Auto Auth
 // @namespace    https://github.com/Xenofan-git/CSQTT-Keenetic
-// @version      1.1.0
+// @version      1.2.0
 // @description  Automatically captures VK implicit OAuth URL on blank.html and sends the token to CSQTT-Keenetic.
 // @match        https://oauth.vk.ru/blank.html*
 // @match        https://oauth.vk.com/blank.html*
 // @run-at       document-start
+// @noframes
 // @grant        none
 // ==/UserScript==
 
