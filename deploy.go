@@ -1,6 +1,7 @@
 package main
 
 import (
+    "archive/zip"
     "context"
     "crypto/rand"
     "encoding/hex"
@@ -176,9 +177,9 @@ func deployRemoteArch(ctx context.Context, r DeployRequest) (string, error) {
     }
 }
 
-func deployFindAsset(ctx context.Context, version, arch string) (deployAsset, error) {
+func deployFindUniversalAPK(ctx context.Context, version string) (deployAsset, error) {
     if version == "" { version = csqttDeployVersion }
-    u := "https://api.github.com/repos/amurcanov/csqtt/releases/tags/" + strings.TrimPrefix(version, "")
+    u := "https://api.github.com/repos/amurcanov/csqtt/releases/tags/" + version
     req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
     if err != nil { return deployAsset{}, err }
     req.Header.Set("Accept", "application/vnd.github+json")
@@ -189,23 +190,39 @@ func deployFindAsset(ctx context.Context, version, arch string) (deployAsset, er
     if resp.StatusCode != http.StatusOK { return deployAsset{}, fmt.Errorf("GitHub release API: HTTP %d", resp.StatusCode) }
     var rel deployRelease
     if err := json.NewDecoder(resp.Body).Decode(&rel); err != nil { return deployAsset{}, err }
-    aliases := map[string][]string{
-        "amd64": {"amd64", "x86_64", "x86-64"},
-        "arm64": {"arm64", "aarch64"},
-        "armv7": {"armv7", "armv7l", "armhf", "arm32"},
-    }
     for _, a := range rel.Assets {
-        n := strings.ToLower(a.Name)
-        if !strings.Contains(n, "server") { continue }
-        for _, alias := range aliases[arch] {
-            if strings.Contains(n, alias) && (strings.HasSuffix(n, ".tar.gz") || strings.HasSuffix(n, ".tgz") || !strings.Contains(n, ".")) {
-                return a, nil
-            }
+        if strings.EqualFold(a.Name, "CSQTT-universal.apk") {
+            return a, nil
         }
     }
-    names := make([]string, 0, len(rel.Assets))
-    for _, a := range rel.Assets { names = append(names, a.Name) }
-    return deployAsset{}, fmt.Errorf("не найден server asset для %s; assets: %s", arch, strings.Join(names, ", "))
+    return deployAsset{}, fmt.Errorf("в релизе %s не найден CSQTT-universal.apk", version)
+}
+
+func deployExtractAPK(apkPath, arch, scriptPath, binaryPath string) error {
+    z, err := zip.OpenReader(apkPath)
+    if err != nil { return err }
+    defer z.Close()
+    binaryName := "assets/csqtt-linux-" + arch
+    var foundScript, foundBinary bool
+    for _, f := range z.File {
+        if f.Name != "assets/deploy.sh" && f.Name != binaryName { continue }
+        rc, err := f.Open()
+        if err != nil { return err }
+        target := scriptPath
+        if f.Name == binaryName { target = binaryPath }
+        out, err := os.OpenFile(target, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0600)
+        if err != nil { rc.Close(); return err }
+        _, copyErr := io.Copy(out, rc)
+        closeErr := out.Close()
+        rc.Close()
+        if copyErr != nil { return copyErr }
+        if closeErr != nil { return closeErr }
+        if f.Name == "assets/deploy.sh" { foundScript = true } else { foundBinary = true }
+    }
+    if !foundScript || !foundBinary {
+        return fmt.Errorf("APK не содержит assets/deploy.sh или %s", binaryName)
+    }
+    return nil
 }
 
 func deployRemoteQuote(s string) string {
@@ -243,12 +260,15 @@ func deployServer(ctx context.Context, r DeployRequest, progress func(string)) (
 
     script := filepath.Join(work, "deploy.sh")
     binary := filepath.Join(work, "csqtt-server")
+    apk := filepath.Join(work, "CSQTT-universal.apk")
     envFile := filepath.Join(work, "csqtt.env")
     overrides := filepath.Join(work, "deploy-overrides.json")
-    if progress != nil { progress("Загрузка deploy.sh…") }
-    if err := deployDownload(ctx, csqttDeployRawScript, script); err != nil { return nil, err }
-    if progress != nil { progress("Загрузка CSQTT server " + asset.Name + "…") }
-    if err := deployDownload(ctx, asset.URL, binary); err != nil { return nil, err }
+    if progress != nil { progress("Загрузка официального CSQTT Android release…") }
+    asset, err := deployFindUniversalAPK(ctx, r.Version)
+    if err != nil { return nil, err }
+    if err := deployDownload(ctx, asset.URL, apk); err != nil { return nil, err }
+    if progress != nil { progress("Извлечение deploy.sh и Linux server из APK…") }
+    if err := deployExtractAPK(apk, arch, script, binary); err != nil { return nil, err }
     _ = os.Chmod(script, 0700)
     _ = os.Chmod(binary, 0700)
 
