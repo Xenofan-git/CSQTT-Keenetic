@@ -355,6 +355,9 @@ func main() {
     stdout, err := cmd.StdoutPipe()
     if err != nil { log.Fatalf("stdout pipe: %v", err) }
     if err := cmd.Start(); err != nil { log.Fatalf("start client: %v", err) }
+    log.Printf("client started pid=%d", cmd.Process.Pid)
+    clientDone := make(chan error, 1)
+    go func() { clientDone <- cmd.Wait() }()
     if c.VKHashMode == "auto_js" {
         bootstrap, bootstrapErr := resolveAutoJSBootstrap(c)
         if bootstrapErr != nil {
@@ -362,16 +365,13 @@ func main() {
             <-clientDone
             log.Fatalf("Auto VK bootstrap: %v", bootstrapErr)
         }
-        if _, writeErr := io.WriteString(clientStdin, "VK_JS_BOOTSTRAP:"+bootstrap+"\\n"); writeErr != nil {
+        if _, writeErr := io.WriteString(clientStdin, "VK_JS_BOOTSTRAP:"+bootstrap+"\n"); writeErr != nil {
             _ = cmd.Process.Kill()
             <-clientDone
             log.Fatalf("Auto VK bootstrap write: %v", writeErr)
         }
         log.Printf("Auto VK: bootstrap передан Rust-клиенту")
     }
-    log.Printf("client started pid=%d", cmd.Process.Pid)
-    clientDone := make(chan error, 1)
-    go func() { clientDone <- cmd.Wait() }()
     lines := make(chan string, 128)
     go func() {
         defer close(lines)
