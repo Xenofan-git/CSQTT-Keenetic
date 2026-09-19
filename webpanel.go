@@ -1,6 +1,7 @@
 package main
 
 import (
+    _ "embed"
     "context"
     "crypto/rand"
     "encoding/base64"
@@ -27,6 +28,9 @@ const (
     vkWebVersion = "5.199"
 )
 
+//go:embed vk-auth.user.js
+var vkAuthUserScript string
+
 var vkTokenMu sync.Mutex
 var vkAuthStates = map[string]time.Time{}
 
@@ -37,6 +41,7 @@ func init() {
 func startCSQTTWebPanel() {
     mux := http.NewServeMux()
     mux.HandleFunc("/", csqttPanel)
+    mux.HandleFunc("/vk-auth.user.js", csqttVKUserScript)
     mux.HandleFunc("/api/vk/token", csqttVKCallback)
     mux.HandleFunc("/api/vk/session", csqttVKSession)
     mux.HandleFunc("/api/vk/oauth-url", csqttVKOAuthURL)
@@ -154,6 +159,16 @@ func csqttPanel(w http.ResponseWriter, r *http.Request) {
     }{OAuthURL: vkOAuthURL()}
     w.Header().Set("Content-Type", "text/html; charset=utf-8")
     _ = csqttPanelTemplate.Execute(w, data)
+}
+
+func csqttVKUserScript(w http.ResponseWriter, r *http.Request) {
+    if r.Method != http.MethodGet {
+        http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+        return
+    }
+    w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
+    w.Header().Set("Cache-Control", "no-store")
+    _, _ = w.Write([]byte(vkAuthUserScript))
 }
 
 func csqttVKCallback(w http.ResponseWriter, r *http.Request) {
