@@ -1,12 +1,12 @@
 #!/bin/sh
 # CSQTT-Keenetic watchdog.
 # The web panel is part of the manager process. If the manager dies OR
-# TCP/2001 disappears after the startup grace period, restart the manager.
+# TCP/2001 disappears after the startup grace period, restart the service.
 
 BASE=/opt/etc/csqtt
-INIT="$BASE/service.sh"
+INIT=/opt/etc/init.d/S99csqtt
 PIDFILE="$BASE/manager.pid"
-LOG="$BASE/manager-live.log"
+LOG="$BASE/watchdog.log"
 
 sleep 15
 
@@ -30,7 +30,7 @@ while :; do
     fi
 
     if [ "$manager_ok" -eq 0 ] || [ "$panel_ok" -eq 0 ]; then
-        echo "`date '+%Y-%m-%d %H:%M:%S'` watchdog: manager_ok=$manager_ok panel_ok=$panel_ok; restarting" >>"$BASE/watchdog.log"
-        "$INIT" restart >>"$BASE/watchdog.log" 2>&1
+        echo "`date '+%Y-%m-%d %H:%M:%S'` watchdog: manager_ok=$manager_ok panel_ok=$panel_ok; restarting" >>"$LOG"
+        "$INIT" restart >>"$LOG" 2>&1
     fi
 done
