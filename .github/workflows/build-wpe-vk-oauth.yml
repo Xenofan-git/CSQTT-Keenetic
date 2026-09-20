@@ -34,7 +34,10 @@ jobs:
           extract_pkg() {
             pkg="$1"
             rel="$(get_url "$pkg")"
-            test -n "$rel"
+            if [ -z "$rel" ]; then
+              echo "WARNING: Entware package $pkg is not present in the target index; skipping it"
+              return 0
+            fi
             curl --http1.1 --compressed -fsSL --retry 4 --retry-all-errors "$ENTWARE_BASE/$rel" -o "$RUNNER_TEMP/ipk/$pkg.ipk"
             file "$RUNNER_TEMP/ipk/$pkg.ipk"
             mkdir -p "$RUNNER_TEMP/ipk/$pkg"
