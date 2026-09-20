@@ -248,16 +248,19 @@ func csqttSaveVKToken(w http.ResponseWriter, r *http.Request) {
     vkTokenMu.Lock()
     defer vkTokenMu.Unlock()
 
-    returnURL := ""
-    if req.State != "" {
-        authState, ok := vkAuthStates[strings.TrimSpace(req.State)]
-        if !ok || authState.ExpiresAt.Before(time.Now()) {
-            http.Error(w, "invalid or expired auth state", http.StatusForbidden)
-            return
-        }
-        returnURL = authState.ReturnURL
-        delete(vkAuthStates, strings.TrimSpace(req.State))
+    stateKey := strings.TrimSpace(req.State)
+    if stateKey == "" {
+        http.Error(w, "auth state is required", http.StatusForbidden)
+        return
     }
+    returnURL := ""
+    authState, ok := vkAuthStates[stateKey]
+    if !ok || authState.ExpiresAt.Before(time.Now()) {
+        http.Error(w, "invalid or expired auth state", http.StatusForbidden)
+        return
+    }
+    returnURL = authState.ReturnURL
+    delete(vkAuthStates, stateKey)
     cfg, err := readCSQTTConfig()
     if err != nil {
         http.Error(w, "cannot read config: "+err.Error(), http.StatusInternalServerError)
@@ -505,7 +508,7 @@ code{word-break:break-all;color:#9ecbff}
   </details>
 </div>
 </div>
-<div id="sec-deploy" class="panelSection"><div class="card">
+</div><div id="sec-deploy" class="panelSection"><div class="card">
 <h2>🚀 Deploy CSQTT Server</h2>
 <p class="muted">Отдельный сервер для Keenetic. Существующий Android endpoint не трогаем. По умолчанию Keenetic использует UDP <b>46010</b>, WEB-панель сервера — TCP <b>46012</b>.</p>
 <div class="row"><div style="flex:1;min-width:220px"><label>VPS host</label><input id="dHost" value="72.56.81.131"></div><div style="width:110px"><label>SSH port</label><input id="dSSH" type="number" value="22"></div></div>
