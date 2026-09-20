@@ -37,13 +37,17 @@ jobs:
             test -n "$rel"
             curl --http1.1 --compressed -fsSL --retry 4 --retry-all-errors "$ENTWARE_BASE/$rel" -o "$RUNNER_TEMP/ipk/$pkg.ipk"
             file "$RUNNER_TEMP/ipk/$pkg.ipk"
-            ar t "$RUNNER_TEMP/ipk/$pkg.ipk" >/dev/null
             mkdir -p "$RUNNER_TEMP/ipk/$pkg"
             cd "$RUNNER_TEMP/ipk/$pkg"
-            ar x "../$pkg.ipk"
-            data="$(find . -maxdepth 1 -name 'data.tar.*' -print -quit)"
-            test -n "$data"
-            tar -xf "$data" -C "$SYSROOT" --strip-components=1
+            if ar t "../$pkg.ipk" >/dev/null 2>&1; then
+              ar x "../$pkg.ipk"
+              data="$(find . -maxdepth 1 -name 'data.tar.*' -print -quit)"
+              test -n "$data"
+              tar -xf "$data" -C "$SYSROOT" --strip-components=1
+            else
+              echo "Entware endpoint returned a gzip-compressed data archive; extracting directly"
+              tar -xzf "../$pkg.ipk" -C "$SYSROOT" --strip-components=1
+            fi
             cd "$GITHUB_WORKSPACE"
           }
           for p in libc libgcc libstdcpp glib2 icu libsoup3 libfreetype fontconfig libpng libjpeg-turbo zlib libxml2 libxslt libffi pcre2 libsqlite3 openssl libcares libpsl libidn2 libunistring libbrotlidec libbrotlienc libbrotlicommon libatomic libbz2 libzstd libexpat; do
