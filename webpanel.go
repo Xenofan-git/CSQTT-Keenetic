@@ -484,9 +484,11 @@ h1{font-size:22px;line-height:28px;margin:4px 4px 14px;font-weight:700}.sectionT
 button{background:var(--blue);color:#fff;border:0;border-radius:13px;padding:11px 16px;font-weight:650;cursor:pointer}button.secondary{background:var(--surface2);color:#444}
 input,textarea{width:100%;box-sizing:border-box;background:#fff;color:#222;border:1px solid #cfd0d5;border-radius:13px;padding:11px;margin:8px 0}small{color:#777}.row{display:flex;gap:10px;flex-wrap:wrap}code{word-break:break-all;color:#1769aa}
 details{background:#f7f7f8;border-radius:15px;padding:10px 12px}summary{font-weight:650;cursor:pointer}
+.tokenAlert{position:fixed;z-index:100;inset:0;background:rgba(0,0,0,.58);display:none;align-items:center;justify-content:center;padding:18px}.tokenAlert.show{display:flex}.tokenAlertBox{width:min(520px,100%);background:#fff;color:#111;border-radius:24px;padding:24px;box-shadow:0 20px 60px rgba(0,0,0,.35)}.tokenAlertTitle{font-size:22px;font-weight:800;color:#d32f2f}.tokenAlertText{margin:12px 0 18px;line-height:1.45}.tokenAlertActions{display:flex;gap:10px;justify-content:flex-end}
 @media(prefers-color-scheme:dark){:root{color-scheme:dark;--bg:#09090a;--surface:#121214;--surface2:#202024;--text:#fafafa;--muted:#c9c9cf;--blue:#1565d8;--blueSoft:#173b72;--line:#35353a}body{background:radial-gradient(circle at 50% 12%,#14151a 0,#09090a 45%)}.topbar .brand{color:#4aa0ff}.version{color:#8ab4f8}.chat{border-color:#4aa0ff;color:#4aa0ff}.card{background:rgba(18,18,20,.96);border-color:rgba(140,140,148,.18);box-shadow:0 5px 24px rgba(0,0,0,.25)}.tabs{background:rgba(18,18,20,.96);border-color:rgba(140,140,148,.24)}.tab{color:#777980}.brandLogo{background:radial-gradient(circle at 35% 30%,#173b72,#121214);border-color:#35353a}.brandLogo span{color:#4aa0ff}.metricRow,details{background:#202024}.metricTitle{color:#9c9da4}.metricValue{color:#e7e7eb}button.secondary{background:#202024;color:#ddd}input,textarea{background:#0d0d0f;color:#eee;border-color:#35353a}}
 @media(max-width:560px){body{padding:10px 10px 100px}.topbar{padding-bottom:12px}.brand{font-size:31px}.tabs{width:calc(100% - 18px);bottom:8px;height:70px}.tab{font-size:10px}.powerCard{min-height:500px;padding:24px 16px}.brandLogo{width:148px;height:148px}.brandLogo span{font-size:80px}}
 </style></head><body>
+<div id="tokenAlert" class="tokenAlert"><div class="tokenAlertBox"><div class="tokenAlertTitle">⚠️ Требуется обновить токен</div><div id="tokenAlertText" class="tokenAlertText">VK отклонил действующий токен. Необходимо пройти авторизацию заново.</div><div class="tokenAlertActions"><button class="secondary" onclick="closeTokenAlert()">Закрыть</button><button onclick="openVKAuthorization()">🔐 Авторизоваться заново</button></div></div></div>
 <div class="topbar"><div class="brand">CSQTT</div><div class="version">v2.2.0by amurcanov</div><div class="chat">•••</div></div><div class="tabs">
 <button class="tab active" data-section="sec-connect">⏻ Подключение</button>
 <button class="tab" data-section="sec-vk">🔑 VK</button>
@@ -507,8 +509,15 @@ details{background:#f7f7f8;border-radius:15px;padding:10px 12px}summary{font-wei
 <div id="sec-vk" class="panelSection">
 <div class="card"><div class="status">VK: <span id="vk" class="warn">проверка…</span></div><div id="uid" class="muted"></div><div id="autoState" class="muted" style="margin-top:10px"></div></div>
 <div class="card">
+<h2>Действующий токен</h2>
+<p class="muted">После авторизации VK скопируй <b>весь URL</b> страницы <code>oauth.vk.ru/blank.html</code> и вставь сюда. Нажми «Сохранить токен» — CSQTT сам извлечёт данные из URL. Сам токен на странице не показывается.</p>
+<input id="vkTokenInput" type="text" autocomplete="off" placeholder="Вставь весь URL blank.html после авторизации VK">
+<div class="row"><button type="button" id="saveVKToken">💾 Сохранить токен</button><button type="button" onclick="openVKAuthorization()">🔐 Авторизоваться</button></div>
+<div id="tokenMsg" class="muted"></div>
+</div>
+<div class="card">
 <h2>Авторизация VK</h2>
-<p class="muted">VK-приложение 7793118 требует штатный redirect <code>https://oauth.vk.ru/blank.html</code>. После входа VK помещает access_token во фрагмент URL. Браузерный скрипт автоматически забирает его и передаёт в CSQTT через callback того же CSQTT-адреса — удалённо по HTTPS через KeenDNS, локально через 192.168.1.1:2001. APK и ручной ввод токена не нужны.</p>
+<p class="muted">1. Нажми «Авторизоваться». 2. Войди в VK. 3. На странице blank.html скопируй весь URL. 4. Вернись сюда, вставь URL в «Действующий токен» и нажми «Сохранить токен».</p>
 <div class="row"><button type="button" id="vkLogin">🔐 Войти через VK</button><button class="secondary" onclick="refresh()">Обновить</button></div>
 <div id="msg" class="muted"></div>
 <div style="margin-top:14px">
@@ -555,7 +564,7 @@ document.querySelectorAll('.tab').forEach(function(btn){btn.onclick=function(){d
 let powerSince=0;
 function fmtTime(ms){let s=Math.floor(ms/1000),h=Math.floor(s/3600);s%=3600;let m=Math.floor(s/60);s%=60;return String(h).padStart(2,'0')+':'+String(m).padStart(2,'0')+':'+String(s).padStart(2,'0')}
 document.getElementById('powerBtn').onclick=async function(){const b=this,target=b.dataset.enabled!=='true';b.disabled=true;b.className='powerBtn powerWait';b.textContent=target?'⏳ ПОДКЛЮЧЕНИЕ…':'⏳ ОТКЛЮЧЕНИЕ…';try{const r=await fetch('/api/tunnel/toggle',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:target})});const x=await r.json();if(!r.ok||!x.ok)throw new Error(x.error||'ошибка');document.getElementById('powerMsg').textContent=target?'Запускаю CSQTT…':'Останавливаю CSQTT…'}catch(e){document.getElementById('powerMsg').textContent='Ошибка: '+e.message}setTimeout(refresh,500);setTimeout(refresh,1500);b.disabled=false};
-document.getElementById('vkLogin').addEventListener('click', async function(){
+async function openVKAuthorization(){
   const msg=document.getElementById('msg');
   try{
     const r=await fetch('/api/vk/session');
@@ -563,11 +572,31 @@ document.getElementById('vkLogin').addEventListener('click', async function(){
     if(!x.ok || !x.state) throw new Error(x.error||'Сеанс авторизации не создан');
     const u=await fetch('/api/vk/oauth-url?state='+encodeURIComponent(x.state)).then(r=>r.json());
     if(!u.ok || !u.url) throw new Error(u.error||'VK OAuth URL не создан');
-    msg.textContent='Открываю VK… После авторизации скрипт на blank.html автоматически вернёт token в CSQTT.';
+    msg.textContent='Открываю VK… После авторизации скопируй весь URL страницы blank.html.';
     window.location.href=u.url;
-  }catch(e){
-    msg.textContent='Не удалось запустить VK: '+e.message;
-  }
+  }catch(e){ msg.textContent='Не удалось запустить VK: '+e.message; }
+}
+document.getElementById('vkLogin').addEventListener('click', openVKAuthorization);
+document.getElementById('saveVKToken').addEventListener('click', async function(){
+  const input=document.getElementById('vkTokenInput'), msg=document.getElementById('tokenMsg');
+  const source=input.value.trim();
+  if(!source){msg.textContent='Вставь полный URL blank.html после авторизации VK.';return}
+  msg.textContent='⏳ Проверяю данные авторизации…';
+  try{
+    const session=await fetch('/api/vk/session',{cache:'no-store'}).then(r=>r.json());
+    if(!session.ok||!session.state) throw new Error(session.error||'Не удалось создать состояние авторизации');
+    let raw=source;
+    try{const u=new URL(source);if(u.hash)raw=u.hash.slice(1)}catch(e){}
+    const p=new URLSearchParams(raw.replace(/^#/,''));
+    const token=p.get('access_token')||'', uid=p.get('user_id')||'', exp=p.get('expires_in')||'0';
+    if(!token) throw new Error('В URL не найден access_token. Нужен URL страницы blank.html после входа VK.');
+    const state=p.get('state')||session.state;
+    const r=await fetch('/api/vk/token',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:token,user_id:uid,expires_in:Number(exp)||0,state:state})});
+    const x=await r.json().catch(()=>({}));
+    if(!r.ok||!x.ok) throw new Error(x.error||('HTTP '+r.status));
+    msg.textContent='✅ Токен принят. CSQTT перезапускается и проверит его через VK Auto API…';
+    input.value=''; setTimeout(refresh,1800);
+  }catch(e){ msg.textContent='❌ Токен не принят: '+e.message; }
 });
 async function deployServer(){
   const msg=document.getElementById('deployMsg');
@@ -613,6 +642,8 @@ async function copyVKBookmarklet(){
     document.getElementById('msg').textContent='✅ Код кнопки выделен. Скопируй его и вставь в URL закладки «CSQTT VK».';
   }
 }
+function closeTokenAlert(){document.getElementById('tokenAlert').classList.remove('show')}
+function showTokenAlert(reason){document.getElementById('tokenAlertText').textContent=reason||'VK отклонил действующий токен. Требуется обновить токен.';document.getElementById('tokenAlert').classList.add('show')}
 async function refresh(){
   updateVKBookmarklet();
   let r=await fetch('/api/vk/status');let x=await r.json();
@@ -620,6 +651,7 @@ async function refresh(){
   document.getElementById('vk').className=x.authorized?'ok':'warn';
   document.getElementById('uid').textContent=x.user_id?'VK ID: '+x.user_id:'';
   const rt=x.runtime||{};
+  if((rt.error||'').toLowerCase().includes('vk token invalid'))showTokenAlert('VK отклонил действующий токен. Требуется обновить токен.');
   const enabled=x.enabled!==false;
   const running=!!rt.client_running;
   const pb=document.getElementById('powerBtn'),ps=document.getElementById('powerState');
