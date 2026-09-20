@@ -20,6 +20,7 @@ import (
     "os/signal"
     "strings"
     "syscall"
+    "sync"
     "time"
     "unsafe"
 )
@@ -52,6 +53,7 @@ type Config struct {
     CaptchaMode   string   `json:"captcha_mode"`
     StateFile     string   `json:"state_file"`
     AllowHashRedistribution bool `json:"allow_hash_redistribution"`
+    Enabled       bool     `json:"enabled"`
 }
 
 func defaults(c *Config) {
@@ -388,6 +390,46 @@ func waitForManagerShutdown(ctx context.Context, reason string) {
     <-ctx.Done()
 }
 
+var currentClientMu sync.Mutex
+var currentClient *os.Process
+
+func setCurrentClient(p *os.Process) {
+    currentClientMu.Lock()
+    currentClient = p
+    currentClientMu.Unlock()
+}
+
+func clearCurrentClient(p *os.Process) {
+    currentClientMu.Lock()
+    if currentClient == p {
+        currentClient = nil
+    }
+    currentClientMu.Unlock()
+}
+
+func stopCurrentClient() {
+    currentClientMu.Lock()
+    p := currentClient
+    currentClientMu.Unlock()
+    if p != nil {
+        _ = p.Signal(syscall.SIGTERM)
+    }
+}
+
+func csqttEnabled(path string) bool {
+    b, err := os.ReadFile(path)
+    if err != nil {
+        return true
+    }
+    var raw struct {
+        Enabled *bool `json:"enabled"`
+    }
+    if err := json.Unmarshal(b, &raw); err != nil || raw.Enabled == nil {
+        return true
+    }
+    return *raw.Enabled
+}
+
 func main() {
     configPath := flag.String("config", "/opt/etc/csqtt/config.json", "config JSON")
     flag.Parse()
@@ -448,6 +490,30 @@ func main() {
 
     unavailableManual := map[string]bool{}
     for {
+        // The web panel and Keenetic's native connection switch control the same
+        // persistent enabled flag. When disabled, keep the manager/web panel alive
+        // but do not run the CSQTT client or keep the TUN interface up.
+        if !csqttEnabled(*configPath) {
+            runtime.Stage = "disabled"
+            runtime.ClientRunning = false
+            runtime.ClientStarted = false
+            runtime.Error = ""
+            writeVKRuntime(c, runtime)
+            _ = ip("link", "set", "dev", tunName, "down")
+            ticker := time.NewTicker(1 * time.Second)
+            for !csqttEnabled(*configPath) {
+                select {
+                case <-ticker.C:
+                case <-ctx.Done():
+                    ticker.Stop()
+                    return
+                }
+            }
+            ticker.Stop()
+            runtime.Stage = "starting"
+            writeVKRuntime(c, runtime)
+        }
+
         // Auto API is intentionally re-run on every recovery. The original
         // Android client uses one VK account/token and creates a fresh call set.
         if managerVKHashMode == "auto_api" {
@@ -489,13 +555,18 @@ func main() {
             writeVKRuntime(c, runtime)
             log.Fatalf("start client: %v", err)
         }
+        setCurrentClient(cmd.Process)
         runtime.Stage = "client_started"
         runtime.ClientStarted = true
         runtime.ClientRunning = true
         writeVKRuntime(c, runtime)
         log.Printf("client started pid=%d", cmd.Process.Pid)
         clientDone := make(chan error, 1)
-        go func() { clientDone <- cmd.Wait() }()
+        go func() {
+            err := cmd.Wait()
+            clearCurrentClient(cmd.Process)
+            clientDone <- err
+        }()
 
         if managerVKHashMode == "auto_js" {
             bootstrap, bootstrapErr := resolveAutoJSBootstrap(c)
