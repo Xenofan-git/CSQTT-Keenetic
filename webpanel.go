@@ -52,6 +52,7 @@ func startCSQTTWebPanel() {
     mux.HandleFunc("/api/vk/oauth-url", csqttVKOAuthURL)
     mux.HandleFunc("/api/vk/status", csqttVKStatus)
     mux.HandleFunc("/api/vk/mode", csqttSetVKMode)
+    mux.HandleFunc("/api/tunnel/toggle", csqttTunnelToggle)
     mux.HandleFunc("/api/config", csqttConfigStatus)
     mux.HandleFunc("/api/deploy/server", csqttDeployServer)
 
@@ -361,13 +362,52 @@ func csqttVKStatus(w http.ResponseWriter, r *http.Request) {
     if b, err := os.ReadFile("/opt/etc/csqtt/vk-runtime.json"); err == nil {
         _ = json.Unmarshal(b, &runtime)
     }
+    enabled := true
+    if v, ok := cfg["enabled"].(bool); ok {
+        enabled = v
+    }
     writeJSON(w, map[string]any{
         "ok": true,
         "authorized": strings.TrimSpace(token) != "",
         "user_id": userID,
         "mode": mode,
+        "enabled": enabled,
         "runtime": runtime,
     })
+}
+
+func csqttTunnelToggle(w http.ResponseWriter, r *http.Request) {
+    if r.Method != http.MethodPost {
+        http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+        return
+    }
+    var req map[string]any
+    if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+        http.Error(w, "invalid json", http.StatusBadRequest)
+        return
+    }
+    enabled, ok := req["enabled"].(bool)
+    if !ok {
+        http.Error(w, "enabled must be boolean", http.StatusBadRequest)
+        return
+    }
+    vkTokenMu.Lock()
+    defer vkTokenMu.Unlock()
+    cfg, err := readCSQTTConfig()
+    if err != nil {
+        http.Error(w, "cannot read config: "+err.Error(), http.StatusInternalServerError)
+        return
+    }
+    cfg["enabled"] = enabled
+    if err := writeCSQTTConfig(cfg); err != nil {
+        http.Error(w, "cannot save config: "+err.Error(), http.StatusInternalServerError)
+        return
+    }
+    if !enabled {
+        stopCurrentClient()
+    }
+    log.Printf("CSQTT Web Panel: tunnel enabled=%v", enabled)
+    writeJSON(w, map[string]any{"ok": true, "enabled": enabled})
 }
 
 func panelClientIsPrivate(r *http.Request) bool {
@@ -428,6 +468,7 @@ var csqttPanelTemplate = template.Must(template.New("panel").Parse(`<!doctype ht
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>CSQTT-Keenetic</title>
 <style>
+.tabs{display:flex;gap:6px;flex-wrap:wrap;margin:12px 0}.tab{background:#333;color:#aaa;border:0;border-radius:10px;padding:9px 13px;font-weight:700}.tab.active{background:#4f7cff;color:#fff}.panelSection{display:none}.panelSection.active{display:block}.powerCard{text-align:center}.powerState{font-size:28px;font-weight:800;margin:8px 0}.powerBtn{width:100%;max-width:360px;font-size:19px;padding:15px;border-radius:15px}.powerOn{background:#d9534f}.powerOff{background:#4f7cff}.powerWait{background:#777}
 body{font-family:system-ui,-apple-system,sans-serif;background:#111;color:#eee;max-width:760px;margin:0 auto;padding:24px}
 .card{background:#1c1c1c;border:1px solid #333;border-radius:16px;padding:20px;margin:14px 0}
 button{background:#4f7cff;color:#fff;border:0;border-radius:10px;padding:11px 16px;font-weight:600;cursor:pointer}
@@ -436,7 +477,18 @@ input{width:100%;box-sizing:border-box;background:#101010;color:#eee;border:1px 
 small{color:#999}.row{display:flex;gap:10px;flex-wrap:wrap}
 code{word-break:break-all;color:#9ecbff}
 </style></head><body>
-<h1>CSQTT-Keenetic</h1>
+<h1>CSQTT-Keenetic</h1><div class="tabs">
+<button class="tab active" data-section="sec-connect">⏻ Подключение</button>
+<button class="tab" data-section="sec-vk">🔑 VK</button>
+<button class="tab" data-section="sec-deploy">☁️ Деплой</button>
+<button class="tab" data-section="sec-settings">⚙️ Настройки</button>
+<button class="tab" data-section="sec-logs">📜 Логи</button>
+<button class="tab" data-section="sec-info">ℹ️ Инфо</button>
+</div>
+<div id="sec-connect" class="panelSection active">
+<div class="card powerCard"><div id="powerState" class="powerState muted">○ ОТКЛЮЧЕНО</div><div id="powerTime" class="muted">00:00:00</div><button id="powerBtn" class="powerBtn powerOff" data-enabled="false">🔵 ПОДКЛЮЧИТЬ</button><div id="powerMsg" class="muted" style="margin-top:10px"></div></div>
+</div>
+<div id="sec-vk" class="panelSection">
 <div class="card"><div class="status">VK: <span id="vk" class="warn">проверка…</span></div><div id="uid" class="muted"></div><div id="autoState" class="muted" style="margin-top:10px"></div></div>
 <div class="card">
 <h2>Авторизация VK</h2>
@@ -453,7 +505,7 @@ code{word-break:break-all;color:#9ecbff}
   </details>
 </div>
 </div>
-<div class="card">
+<div id="sec-deploy" class="panelSection"><div class="card">
 <h2>🚀 Deploy CSQTT Server</h2>
 <p class="muted">Отдельный сервер для Keenetic. Существующий Android endpoint не трогаем. По умолчанию Keenetic использует UDP <b>46010</b>, WEB-панель сервера — TCP <b>46012</b>.</p>
 <div class="row"><div style="flex:1;min-width:220px"><label>VPS host</label><input id="dHost" value="72.56.81.131"></div><div style="width:110px"><label>SSH port</label><input id="dSSH" type="number" value="22"></div></div>
@@ -466,7 +518,7 @@ code{word-break:break-all;color:#9ecbff}
 <div class="row"><button onclick="deployServer()">🚀 Deploy / Redeploy</button></div>
 <pre id="deployMsg" class="muted" style="white-space:pre-wrap"></pre>
 </div>
-<div class="card">
+<div id="sec-settings" class="panelSection"><div class="card">
 <h2>Hash режим</h2>
 <p class="muted">Один авторизованный VK аккаунт используется для обоих автоматических режимов.</p>
 <label><input type="radio" name="hashMode" value="manual" onchange="modeChanged()"> Ручной — вставить VK hashes</label>
@@ -478,8 +530,14 @@ code{word-break:break-all;color:#9ecbff}
 </div>
 <div class="row"><button onclick="saveMode()">Сохранить режим</button></div>
 <div id="modeMsg" class="muted"></div>
-</div>
+</div></div>
+<div id="sec-logs" class="panelSection"><div class="card"><h2>📜 Логи</h2><p class="muted">Вкладка подготовлена. Подключение журнала добавим отдельно.</p></div></div>
+<div id="sec-info" class="panelSection"><div class="card"><h2>ℹ️ Информация</h2><p class="muted">CSQTT-Keenetic · ARM64/aarch64 · Entware</p><p class="muted">Панель: 2001 · TUN: csqtt0</p></div></div>
 <script>
+document.querySelectorAll('.tab').forEach(function(btn){btn.onclick=function(){document.querySelectorAll('.tab').forEach(function(x){x.classList.remove('active')});document.querySelectorAll('.panelSection').forEach(function(x){x.classList.remove('active')});btn.classList.add('active');document.getElementById(btn.dataset.section).classList.add('active')}});
+let powerSince=0;
+function fmtTime(ms){let s=Math.floor(ms/1000),h=Math.floor(s/3600);s%=3600;let m=Math.floor(s/60);s%=60;return String(h).padStart(2,'0')+':'+String(m).padStart(2,'0')+':'+String(s).padStart(2,'0')}
+document.getElementById('powerBtn').onclick=async function(){const b=this,target=b.dataset.enabled!=='true';b.disabled=true;b.className='powerBtn powerWait';b.textContent=target?'⏳ ПОДКЛЮЧЕНИЕ…':'⏳ ОТКЛЮЧЕНИЕ…';try{const r=await fetch('/api/tunnel/toggle',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:target})});const x=await r.json();if(!r.ok||!x.ok)throw new Error(x.error||'ошибка');document.getElementById('powerMsg').textContent=target?'Запускаю CSQTT…':'Останавливаю CSQTT…'}catch(e){document.getElementById('powerMsg').textContent='Ошибка: '+e.message}setTimeout(refresh,500);setTimeout(refresh,1500);b.disabled=false};
 document.getElementById('vkLogin').addEventListener('click', async function(){
   const msg=document.getElementById('msg');
   try{
@@ -534,6 +592,13 @@ async function refresh(){
   document.getElementById('vk').className=x.authorized?'ok':'warn';
   document.getElementById('uid').textContent=x.user_id?'VK ID: '+x.user_id:'';
   const rt=x.runtime||{};
+  const enabled=x.enabled!==false;
+  const running=!!rt.client_running;
+  const pb=document.getElementById('powerBtn'),ps=document.getElementById('powerState');
+  if(running){ps.textContent='🟢 ПОДКЛЮЧЕНО';ps.className='powerState ok';pb.textContent='🔴 ОТКЛЮЧИТЬ';pb.className='powerBtn powerOn';pb.dataset.enabled='true';if(!powerSince)powerSince=Date.now()}
+  else if(!enabled){ps.textContent='○ ОТКЛЮЧЕНО';ps.className='powerState muted';pb.textContent='🔵 ПОДКЛЮЧИТЬ';pb.className='powerBtn powerOff';pb.dataset.enabled='false';powerSince=0}
+  else{ps.textContent='🟡 ПОДКЛЮЧЕНИЕ…';ps.className='powerState warn';pb.textContent='🔵 ПОДКЛЮЧИТЬ';pb.className='powerBtn powerOff';pb.dataset.enabled='false';powerSince=0}
+  document.getElementById('powerTime').textContent=powerSince?fmtTime(Date.now()-powerSince):'00:00:00';
   const labels={starting:'Запуск manager…',getting_hashes:'Получаю VK hashes…',hashes_received:'Hashes получены',client_started:'Запускаю CSQTT…',client_stopped:'CSQTT остановлен',idle:'Ожидание',error:'Ошибка'};
   let st=labels[rt.stage]||rt.stage||'Ожидание';
   if(rt.stage==='getting_hashes' && rt.calls_requested) st+=' ('+Number(rt.calls_created||0)+'/'+Number(rt.calls_requested)+')';
