@@ -1,1 +1,3 @@
-CSQTT-Keenetic
+# Build information
+
+Manual VK token UI preparation.
