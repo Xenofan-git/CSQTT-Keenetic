@@ -514,10 +514,11 @@ details{background:#f7f7f8;border-radius:15px;padding:10px 12px}summary{font-wei
 <div style="margin-top:14px">
   <details>
     <summary>🧩 Скрипт автоматического получения токена v1.3</summary>
-    <p class="muted">Для Android используй Firefox + Violentmonkey: установи расширение один раз, затем открой userscript ниже. После этого вход через VK выполняется автоматически, без копирования токена.</p>
-    <a href="/vk-auth.user.js" target="_blank">📥 Открыть userscript</a>
+    <p class="muted"><b>Самый простой вариант:</b> один раз добавь кнопку «CSQTT VK» в закладки браузера. После этого схема будет: войти в VK → на странице blank.html нажать «CSQTT VK» → токен автоматически передастся в CSQTT → возврат в панель.</p>
+    <button type="button" onclick="copyVKBookmarklet()">📋 Скопировать кнопку «CSQTT VK»</button>
     <textarea id="vkBookmarklet" readonly rows="4" style="width:100%;box-sizing:border-box;background:#101010;color:#9ecbff;border:1px solid #444;border-radius:10px;padding:11px;margin-top:10px"></textarea>
-    <small>Bookmarklet: скопируй код в URL закладки с именем «CSQTT VK».</small>
+    <small><b>Один раз:</b> скопируй этот код и создай закладку с именем «CSQTT VK», вставив код в поле URL/адрес. На Android Chrome: меню ⋮ → ⭐ Добавить в закладки; затем отредактируй URL закладки и вставь код. После этого код больше копировать не нужно.</small>
+    <p class="muted" style="margin-top:10px">🔒 Токен не показывается и не копируется вручную. Скрипт берёт его из URL-фрагмента VK, проверяет CSQTT state и отправляет только на callback твоей панели.</p>
   </details>
 </div>
 </div>
@@ -598,8 +599,19 @@ async function deployServer(){
 function updateVKBookmarklet(){
   const out=document.getElementById('vkBookmarklet');
   if(!out) return;
-  const code="javascript:(()=>{const p=new URLSearchParams(location.hash.slice(1));const t=p.get('access_token');const u=p.get('user_id')||'';const e=p.get('expires_in')||'0';const s=p.get('state')||'';if(!t||!s){alert('CSQTT VK: token/state не найден');return;}let d=s.replace(/-/g,'+').replace(/_/g,'/');while(d.length%4)d+='=';let raw='';try{raw=new TextDecoder().decode(Uint8Array.from(atob(d),c=>c.charCodeAt(0)))}catch(_){alert('CSQTT VK: неверный state');return;}const i=raw.indexOf('|');const cb=raw.slice(0,i);if(!/^https?:\\/\\/[^|]+\\/api\\/vk\\/token$/i.test(cb)){alert('CSQTT VK: неверный callback');return;}const f=document.createElement('form');f.method='POST';f.action=cb;[['token',t],['user_id',u],['expires_in',e],['state',s]].forEach(([n,v])=>{const x=document.createElement('input');x.type='hidden';x.name=n;x.value=v;f.appendChild(x)});document.documentElement.appendChild(f);f.submit();})();";
+  const code="javascript:(()=>{try{const p=new URLSearchParams(location.hash.slice(1)),t=p.get('access_token')||'',u=p.get('user_id')||'',e=p.get('expires_in')||'0',s=p.get('state')||'';if(!t||!s)throw Error('VK не вернул token/state');let d=s.replace(/-/g,'+').replace(/_/g,'/');while(d.length%4)d+='=';const raw=new TextDecoder().decode(Uint8Array.from(atob(d),c=>c.charCodeAt(0))),i=raw.indexOf('|'),cb=raw.slice(0,i);if(!/^https?:\\/\\/[^|]+\\/api\\/vk\\/token$/i.test(cb))throw Error('неверный CSQTT callback');const f=document.createElement('form');f.method='POST';f.action=cb;[['token',t],['user_id',u],['expires_in',e],['state',s]].forEach(([n,v])=>{const x=document.createElement('input');x.type='hidden';x.name=n;x.value=v;f.appendChild(x)});document.body.appendChild(f);f.submit()}catch(e){alert('CSQTT VK: '+e.message)}})();";
   out.value=code;
+}
+async function copyVKBookmarklet(){
+  updateVKBookmarklet();
+  const out=document.getElementById('vkBookmarklet');
+  try{
+    await navigator.clipboard.writeText(out.value);
+    document.getElementById('msg').textContent='✅ Код кнопки скопирован. Создай/отредактируй закладку «CSQTT VK» и вставь его в поле URL.';
+  }catch(e){
+    out.focus();out.select();document.execCommand('copy');
+    document.getElementById('msg').textContent='✅ Код кнопки выделен. Скопируй его и вставь в URL закладки «CSQTT VK».';
+  }
 }
 async function refresh(){
   updateVKBookmarklet();
