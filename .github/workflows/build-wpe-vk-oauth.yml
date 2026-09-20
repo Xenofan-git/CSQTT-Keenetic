@@ -50,7 +50,8 @@ jobs:
             fi
             cd "$GITHUB_WORKSPACE"
           }
-          for p in libc libgcc libstdcpp glib2 icu libsoup3 libfreetype fontconfig libpng libjpeg-turbo zlib libxml2 libxslt libffi pcre2 libsqlite3 openssl libcares libpsl libidn2 libunistring libbrotlidec libbrotlienc libbrotlicommon libatomic libbz2 libzstd libexpat; do
+          # Entware uses libpcre2 as the PCRE2 package name.
+          for p in libc libgcc libstdcpp glib2 icu libsoup3 libfreetype fontconfig libpng libjpeg-turbo zlib libxml2 libxslt libffi libpcre2 libsqlite3 openssl libcares libpsl libidn2 libunistring libbrotlidec libbrotlienc libbrotlicommon libatomic libbz2 libzstd libexpat; do
             extract_pkg "$p"
           done
           mkdir -p "$SYSROOT/lib" "$SYSROOT/usr/lib"
