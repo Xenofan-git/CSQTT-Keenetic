@@ -59,6 +59,13 @@ jobs:
           done
           mkdir -p "$SYSROOT/lib" "$SYSROOT/usr/lib"
           if [ -e "$SYSROOT/lib/ld-2.27.so" ]; then ln -sf ld-2.27.so "$SYSROOT/lib/ld-linux-aarch64.so.1"; fi
+          # Entware runtime packages may omit unversioned linker symlinks used by CMake find_library().
+          for lib in glib-2.0 gobject-2.0 gio-2.0 gmodule-2.0 gthread-2.0; do
+            so="$(find "$SYSROOT/lib" -maxdepth 1 -name "lib${lib}.so.*" -print -quit)"
+            if [ -n "$so" ] && [ ! -e "$SYSROOT/lib/lib${lib}.so" ]; then
+              ln -sf "$(basename "$so")" "$SYSROOT/lib/lib${lib}.so"
+            fi
+          done
           du -sh "$SYSROOT"
       - name: Fetch WPE WebKit
         run: |
