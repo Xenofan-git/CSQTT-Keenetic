@@ -24,7 +24,7 @@ const (
     csqttWebListen = "0.0.0.0:2001"
     vkWebAppID = "7793118"
     vkWebScope = "1073737727"
-    vkWebRedirect = "https://oauth.vk.ru/blank.html"
+    vkWebRedirect = "https://csqtt.xenofan.netcraze.link/api/vk/token"
     vkWebVersion = "5.199"
 )
 
@@ -116,9 +116,10 @@ func csqttVKOAuthURL(w http.ResponseWriter, r *http.Request) {
 }
 
 func vkOAuthRedirect(r *http.Request) string {
-    // VK application 7793118 uses the registered blank.html redirect.
-    // The access_token is returned in the URL fragment and captured by the
-    // browser userscript running on oauth.vk.ru/blank.html.
+    // Primary flow: VK redirects directly to the CSQTT callback page.
+    // The access_token remains in the browser URL fragment and is immediately
+    // POSTed by the callback page to this same origin. No userscript/bookmarklet
+    // is required.
     return vkWebRedirect
 }
 func csqttVKSession(w http.ResponseWriter, r *http.Request) {
@@ -208,7 +209,11 @@ func csqttVKUserScript(w http.ResponseWriter, r *http.Request) {
 
 func csqttVKCallback(w http.ResponseWriter, r *http.Request) {
     if r.Method == http.MethodGet {
+        // OAuth implicit flow returns the access_token in location.hash.
+        // The fragment is never sent to the server, so this tiny same-origin
+        // callback page posts it back to /api/vk/token automatically.
         w.Header().Set("Content-Type", "text/html; charset=utf-8")
+        w.Header().Set("Cache-Control", "no-store")
         _, _ = w.Write([]byte(vkCallbackHTML))
         return
     }
@@ -624,11 +629,11 @@ details{background:#f7f7f8;border-radius:15px;padding:10px 12px}summary{font-wei
 </div>
 <div style="margin-top:14px">
   <details>
-    <summary>🧩 Скрипт автоматического получения токена v1.3</summary>
+    <summary>🧩 Резервный способ — скрипт VK</summary>
     <p class="muted"><b>Сценарий:</b> войти в VK → на странице blank.html запустить кнопку «CSQTT VK» → скопировать ссылку страницы → нажать «Раздел авторизации» → вставить ссылку в поле выше.</p>
     <button type="button" onclick="copyVKBookmarklet()">📋 Скопировать кнопку «CSQTT VK»</button>
     <textarea id="vkBookmarklet" readonly rows="4" style="width:100%;box-sizing:border-box;background:#101010;color:#9ecbff;border:1px solid #444;border-radius:10px;padding:11px;margin-top:10px"></textarea>
-    <small><b>Один раз:</b> скопируй этот код и создай закладку с именем «CSQTT VK», вставив код в поле URL/адрес. На Android Chrome: меню ⋮ → ⭐ Добавить в закладки; затем отредактируй URL закладки и вставь код. После этого код больше копировать не нужно.</small>
+    <small>Основной вход теперь работает без этого скрипта. Этот вариант оставлен только как резервный для старого redirect VK.</small>
     <p class="muted" style="margin-top:10px">🔒 Токен не показывается и не копируется вручную. Скрипт берёт его из URL-фрагмента VK, проверяет CSQTT state и отправляет только на callback твоей панели.</p>
   </details>
 </div>
