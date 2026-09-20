@@ -48,6 +48,7 @@ func startCSQTTWebPanel() {
     mux.HandleFunc("/", csqttPanel)
     mux.HandleFunc("/vk-auth.user.js", csqttVKUserScript)
     mux.HandleFunc("/api/vk/token", csqttVKCallback)
+    mux.HandleFunc("/api/vk/validate", csqttValidateVKToken)
     mux.HandleFunc("/api/vk/session", csqttVKSession)
     mux.HandleFunc("/api/vk/oauth-url", csqttVKOAuthURL)
     mux.HandleFunc("/api/vk/status", csqttVKStatus)
@@ -214,6 +215,88 @@ func csqttVKCallback(w http.ResponseWriter, r *http.Request) {
     csqttSaveVKToken(w, r)
 }
 
+func parseVKTokenInput(raw string) (token, userID string, expiresIn int64, state string, err error) {
+    raw = strings.TrimSpace(raw)
+    if raw == "" {
+        return "", "", 0, "", fmt.Errorf("токен или URL blank.html не указан")
+    }
+
+    // Preferred format: the complete VK blank.html URL containing the token
+    // in the URL fragment. We also accept a raw token for backwards compatibility.
+    if u, e := url.Parse(raw); e == nil && u.Fragment != "" {
+        q, e := url.ParseQuery(u.Fragment)
+        if e == nil && q.Get("access_token") != "" {
+            if !strings.HasSuffix(strings.ToLower(u.Path), "/blank.html") {
+                return "", "", 0, "", fmt.Errorf("нужна полная ссылка VK blank.html")
+            }
+            token = strings.TrimSpace(q.Get("access_token"))
+            userID = strings.TrimSpace(q.Get("user_id"))
+            state = strings.TrimSpace(q.Get("state"))
+            expiresIn, _ = strconv.ParseInt(q.Get("expires_in"), 10, 64)
+            return token, userID, expiresIn, state, nil
+        }
+    }
+    token = raw
+    return token, "", 0, "", nil
+}
+
+func validateVKAccessToken(token string) (string, error) {
+    token = strings.TrimSpace(token)
+    if token == "" {
+        return "", fmt.Errorf("пустой VK token")
+    }
+    q := url.Values{}
+    q.Set("access_token", token)
+    q.Set("v", vkWebVersion)
+    req, err := http.NewRequest(http.MethodGet, "https://api.vk.com/method/users.get?"+q.Encode(), nil)
+    if err != nil {
+        return "", err
+    }
+    client := &http.Client{Timeout: 12 * time.Second}
+    resp, err := client.Do(req)
+    if err != nil {
+        return "", fmt.Errorf("VK API недоступен: %w", err)
+    }
+    defer resp.Body.Close()
+    var out struct {
+        Response []struct {
+            ID int64 `json:"id"`
+        } `json:"response"`
+        Error *struct {
+            Code int `json:"error_code"`
+            Msg  string `json:"error_msg"`
+        } `json:"error"`
+    }
+    if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+        return "", fmt.Errorf("некорректный ответ VK API")
+    }
+    if out.Error != nil {
+        return "", fmt.Errorf("VK token недействителен: code=%d %s", out.Error.Code, out.Error.Msg)
+    }
+    if len(out.Response) == 0 || out.Response[0].ID == 0 {
+        return "", fmt.Errorf("VK token не прошёл проверку")
+    }
+    return strconv.FormatInt(out.Response[0].ID, 10), nil
+}
+
+func csqttValidateVKToken(w http.ResponseWriter, r *http.Request) {
+    if r.Method != http.MethodPost {
+        http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+        return
+    }
+    var req struct{ Token string `json:"token"` }
+    if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+        http.Error(w, "invalid json", http.StatusBadRequest)
+        return
+    }
+    userID, err := validateVKAccessToken(req.Token)
+    if err != nil {
+        writeJSON(w, map[string]any{"ok": true, "valid": false, "message": "Требуется обновить токен"})
+        return
+    }
+    writeJSON(w, map[string]any{"ok": true, "valid": true, "user_id": userID})
+}
+
 func csqttSaveVKToken(w http.ResponseWriter, r *http.Request) {
     if r.Method != http.MethodPost {
         http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -239,28 +322,47 @@ func csqttSaveVKToken(w http.ResponseWriter, r *http.Request) {
         http.Error(w, "invalid json", http.StatusBadRequest)
         return
     }
-    token := strings.TrimSpace(req.Token)
+
+    // The UI accepts the entire blank.html URL in "token". Extract its
+    // fragment here so the browser never needs to expose the token in the UI.
+    token, parsedUserID, parsedExpires, parsedState, err := parseVKTokenInput(req.Token)
+    if err != nil {
+        http.Error(w, err.Error(), http.StatusBadRequest)
+        return
+    }
+    if parsedUserID != "" { req.UserID = parsedUserID }
+    if parsedExpires != 0 { req.ExpiresIn = parsedExpires }
+    if parsedState != "" { req.State = parsedState }
+    token = strings.TrimSpace(token)
     if token == "" || len(token) < 16 {
         http.Error(w, "invalid token", http.StatusBadRequest)
         return
     }
 
+    // Validate before replacing the currently working token.
+    validUserID, err := validateVKAccessToken(token)
+    if err != nil {
+        writeJSON(w, map[string]any{"ok": false, "valid": false, "message": "Требуется обновить токен"})
+        return
+    }
+    if req.UserID == "" { req.UserID = validUserID }
+
     vkTokenMu.Lock()
     defer vkTokenMu.Unlock()
 
     stateKey := strings.TrimSpace(req.State)
-    if stateKey == "" {
-        http.Error(w, "auth state is required", http.StatusForbidden)
-        return
+    if stateKey != "" {
+        authState, ok := vkAuthStates[stateKey]
+        if !ok || authState.ExpiresAt.Before(time.Now()) {
+            http.Error(w, "invalid or expired auth state", http.StatusForbidden)
+            return
+        }
+        // Consume a state only when one was supplied. Manual URL paste is
+        // still accepted for a valid token, while OAuth callbacks remain bound
+        // to the short-lived state created by this panel.
+        delete(vkAuthStates, stateKey)
     }
-    returnURL := ""
-    authState, ok := vkAuthStates[stateKey]
-    if !ok || authState.ExpiresAt.Before(time.Now()) {
-        http.Error(w, "invalid or expired auth state", http.StatusForbidden)
-        return
-    }
-    returnURL = authState.ReturnURL
-    delete(vkAuthStates, stateKey)
+
     cfg, err := readCSQTTConfig()
     if err != nil {
         http.Error(w, "cannot read config: "+err.Error(), http.StatusInternalServerError)
@@ -278,28 +380,24 @@ func csqttSaveVKToken(w http.ResponseWriter, r *http.Request) {
     }
     log.Printf("CSQTT Web Panel: VK access token saved for user %s", req.UserID)
 
-    // Browser capture uses a top-level form POST. Return a small HTML page so
-    // the user is sent back to the panel automatically after the token is saved.
     if strings.HasPrefix(contentType, "application/x-www-form-urlencoded") || strings.HasPrefix(contentType, "multipart/form-data") {
         w.Header().Set("Content-Type", "text/html; charset=utf-8")
-        safeReturn := returnURL
-        if safeReturn == "" {
-            safeReturn = "/"
+        returnURL := "/"
+        if stateKey != "" {
+            // Reconstructing a return URL from the state is intentionally avoided
+            // after validation; the panel origin is always the safe destination.
+            returnURL = "/"
         }
-        // Only return to a URL that was generated by our own short-lived auth state.
-        _, _ = fmt.Fprintf(w, `<!doctype html><html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>CSQTT VK</title><body style="font-family:system-ui;background:#111;color:#eee;text-align:center;padding:40px"><h2 style="color:#67e8a5">VK авторизация выполнена ✓</h2><p>Токен получен. Возвращаю в CSQTT…</p><script>setTimeout(function(){location.replace(%q)},900)</script></body></html>`, safeReturn)
+        _, _ = fmt.Fprintf(w, `<!doctype html><html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>CSQTT VK</title><body style="font-family:system-ui;background:#111;color:#eee;text-align:center;padding:40px"><h2 style="color:#67e8a5">VK авторизация выполнена ✓</h2><p>Токен проверен и сохранён. Возвращаю в CSQTT…</p><script>setTimeout(function(){location.replace(%q)},900)</script></body></html>`, returnURL)
     } else {
-        writeJSON(w, map[string]any{"ok": true, "user_id": req.UserID, "restart_pending": true})
+        writeJSON(w, map[string]any{"ok": true, "valid": true, "user_id": req.UserID, "restart_pending": true})
     }
 
-    // The web panel lives in the manager process. Restart it after the response so
-    // the freshly saved token is consumed immediately by the normal startup path.
     go func() {
         time.Sleep(1200 * time.Millisecond)
         _ = syscall.Kill(os.Getpid(), syscall.SIGTERM)
     }()
 }
-
 func csqttSetVKMode(w http.ResponseWriter, r *http.Request) {
     if r.Method != http.MethodPost {
         http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -360,6 +458,13 @@ func csqttVKStatus(w http.ResponseWriter, r *http.Request) {
     }
     token, _ := cfg["vk_access_token"].(string)
     userID, _ := cfg["vk_user_id"].(string)
+    tokenValid := false
+    if strings.TrimSpace(token) != "" {
+        if validatedID, err := validateVKAccessToken(token); err == nil {
+            tokenValid = true
+            if userID == "" { userID = validatedID }
+        }
+    }
     mode, _ := cfg["vk_hash_mode"].(string)
     runtime := map[string]any{}
     if b, err := os.ReadFile("/opt/etc/csqtt/vk-runtime.json"); err == nil {
@@ -372,6 +477,7 @@ func csqttVKStatus(w http.ResponseWriter, r *http.Request) {
     writeJSON(w, map[string]any{
         "ok": true,
         "authorized": strings.TrimSpace(token) != "",
+        "token_valid": tokenValid,
         "user_id": userID,
         "mode": mode,
         "enabled": enabled,
@@ -511,6 +617,12 @@ details{background:#f7f7f8;border-radius:15px;padding:10px 12px}summary{font-wei
 <p class="muted">VK-приложение 7793118 требует штатный redirect <code>https://oauth.vk.ru/blank.html</code>. После входа VK помещает access_token во фрагмент URL. Браузерный скрипт автоматически забирает его и передаёт в CSQTT через callback того же CSQTT-адреса — удалённо по HTTPS через KeenDNS, локально через 192.168.1.1:2001. APK и ручной ввод токена не нужны.</p>
 <div class="row"><button type="button" id="vkLogin">🔐 Войти через VK</button><button class="secondary" onclick="refresh()">Обновить</button></div>
 <div id="msg" class="muted"></div>
+<div class="tokenManual card" style="margin:14px 0 0;padding:16px;background:#f7f8fa">
+<label for="vkTokenInput"><b>Действующий токен</b></label>
+<input id="vkTokenInput" type="text" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="Вставь всю ссылку https://oauth.vk.ru/blank.html#access_token=…">
+<div class="row"><button type="button" id="saveVKToken">Сохранить токен</button></div>
+<div id="tokenMsg" class="muted"></div>
+</div>
 <div style="margin-top:14px">
   <details>
     <summary>🧩 Скрипт автоматического получения токена v1.3</summary>
@@ -569,6 +681,37 @@ document.getElementById('vkLogin').addEventListener('click', async function(){
     msg.textContent='Не удалось запустить VK: '+e.message;
   }
 });
+function showVKTokenModal(){
+  let m=document.getElementById('vkTokenModal');
+  if(!m){
+    m=document.createElement('div');
+    m.id='vkTokenModal';
+    m.className='modal';
+    m.innerHTML='<div class="modalBox"><h2>⚠️ Требуется обновить токен</h2><p class="muted">Текущий VK токен не проходит проверку. Авторизуйся заново и вставь полную ссылку <b>blank.html</b> в поле «Действующий токен».</p><div class="row"><button type="button" id="modalVKLogin">🔐 Авторизоваться через VK</button><button type="button" class="secondary" id="modalClose">Закрыть</button></div></div>';
+    document.body.appendChild(m);
+    document.getElementById('modalClose').onclick=()=>m.remove();
+    document.getElementById('modalVKLogin').onclick=()=>{m.remove();document.getElementById('vkLogin').click()};
+  }
+}
+async function saveVKToken(){
+  const input=document.getElementById('vkTokenInput'), msg=document.getElementById('tokenMsg');
+  const raw=input.value.trim();
+  if(!raw){msg.textContent='Вставь полную ссылку VK blank.html.';return}
+  msg.textContent='Проверяю токен…';
+  try{
+    const r=await fetch('/api/vk/token',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:raw})});
+    const x=await r.json().catch(()=>({}));
+    if(!r.ok||!x.ok){
+      msg.textContent=x.message||'Требуется обновить токен';
+      return;
+    }
+    input.value='';
+    msg.textContent='✅ Токен проверен и сохранён. CSQTT перезапускается…';
+    setTimeout(refresh,1500);
+  }catch(e){msg.textContent='Ошибка: '+e.message}
+}
+document.getElementById('saveVKToken').onclick=saveVKToken;
+
 async function deployServer(){
   const msg=document.getElementById('deployMsg');
   msg.textContent='⏳ Подготовка deploy…\nЭто может занять несколько минут.';
@@ -616,8 +759,9 @@ async function copyVKBookmarklet(){
 async function refresh(){
   updateVKBookmarklet();
   let r=await fetch('/api/vk/status');let x=await r.json();
-  document.getElementById('vk').textContent=x.authorized?'🟢 Авторизован':'🔴 Не авторизован';
-  document.getElementById('vk').className=x.authorized?'ok':'warn';
+  document.getElementById('vk').textContent=x.token_valid?'🟢 Авторизован':'🔴 Не авторизован';
+  document.getElementById('vk').className=x.token_valid?'ok':'warn';
+  if(!x.token_valid) showVKTokenModal();
   document.getElementById('uid').textContent=x.user_id?'VK ID: '+x.user_id:'';
   const rt=x.runtime||{};
   const enabled=x.enabled!==false;
