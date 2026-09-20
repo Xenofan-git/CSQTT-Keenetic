@@ -545,7 +545,8 @@ func csqttDeployServer(w http.ResponseWriter, r *http.Request) {
     defer cancel()
     result, err := deployServer(ctx, req, func(msg string) {
         log.Printf("CSQTT Deploy: %s", msg)
-    })    if err != nil {
+    })
+    if err != nil {
         log.Printf("CSQTT Deploy failed: %v", err)
         writeJSON(w, map[string]any{"ok": false, "error": err.Error()})
         return
