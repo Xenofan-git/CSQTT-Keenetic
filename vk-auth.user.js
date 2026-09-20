@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         CSQTT-Keenetic VK Auto Auth
 // @namespace    https://github.com/Xenofan-git/CSQTT-Keenetic
-// @version      1.2.0
+// @version      1.3.0
 // @description  Automatically captures VK implicit OAuth URL on blank.html and sends the token to CSQTT-Keenetic.
 // @match        https://oauth.vk.ru/blank.html*
 // @match        https://oauth.vk.com/blank.html*
@@ -54,13 +54,15 @@
   const separator = rawState.indexOf("|");
   if (separator <= 0) return;
 
-  const panel = rawState.slice(0, separator);
-  if (!/^https?:\/\//i.test(panel)) return;
+  const callback = rawState.slice(0, separator);
+  if (!/^https:\/\/[^|]+\/api\/vk\/token$/i.test(callback)) return;
 
+  // The first field in state is the HTTPS capture callback. The second field
+  // is the panel URL used by the callback server for the automatic return.
   // Use a real form POST so no CORS permission is required.
   const form = document.createElement("form");
   form.method = "POST";
-  form.action = panel.replace(/\/$/, "") + "/api/vk/token";
+  form.action = callback;
   form.style.display = "none";
 
   const fields = {
