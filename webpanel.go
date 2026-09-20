@@ -471,16 +471,19 @@ var csqttPanelTemplate = template.Must(template.New("panel").Parse(`<!doctype ht
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>CSQTT-Keenetic</title>
 <style>
-.tabs{display:flex;gap:6px;flex-wrap:wrap;margin:12px 0}.tab{background:#333;color:#aaa;border:0;border-radius:10px;padding:9px 13px;font-weight:700}.tab.active{background:#4f7cff;color:#fff}.panelSection{display:none}.panelSection.active{display:block}.powerCard{text-align:center}.powerState{font-size:28px;font-weight:800;margin:8px 0}.powerBtn{width:100%;max-width:360px;font-size:19px;padding:15px;border-radius:15px}.powerOn{background:#d9534f}.powerOff{background:#4f7cff}.powerWait{background:#777}
-body{font-family:system-ui,-apple-system,sans-serif;background:#111;color:#eee;max-width:760px;margin:0 auto;padding:24px}
-.card{background:#1c1c1c;border:1px solid #333;border-radius:16px;padding:20px;margin:14px 0}
-button{background:#4f7cff;color:#fff;border:0;border-radius:10px;padding:11px 16px;font-weight:600;cursor:pointer}
-button.secondary{background:#333}.status{font-size:18px}.muted{color:#aaa}.ok{color:#67e8a5}.warn{color:#ffd166}
-input{width:100%;box-sizing:border-box;background:#101010;color:#eee;border:1px solid #444;border-radius:10px;padding:11px;margin:8px 0}
-small{color:#999}.row{display:flex;gap:10px;flex-wrap:wrap}
-code{word-break:break-all;color:#9ecbff}
+:root{color-scheme:dark;--bg:#09090a;--surface:#121214;--surface2:#202024;--text:#fafafa;--muted:#c9c9cf;--blue:#1565d8;--blue2:#173b72;--teal:#00e5c0;--green:#4caf50;--amber:#ffb74d;--red:#ef5350;--line:#35353a}
+*{box-sizing:border-box}html,body{min-height:100%;margin:0}body{font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:radial-gradient(circle at 50% 12%,#14151a 0,#09090a 45%);color:var(--text);max-width:760px;margin:0 auto;padding:18px 18px 104px}
+h1{font-size:22px;line-height:28px;margin:4px 4px 14px;font-weight:700;letter-spacing:-.2px}.tabs{position:fixed;z-index:20;left:50%;bottom:10px;transform:translateX(-50%);width:min(716px,calc(100% - 28px));height:66px;display:flex;gap:4px;padding:7px;background:rgba(18,18,20,.96);border:1px solid rgba(140,140,148,.24);border-radius:22px;box-shadow:0 8px 28px rgba(0,0,0,.45);backdrop-filter:blur(16px)}
+.tab{flex:1;background:transparent;color:#777980;border:0;border-radius:17px;padding:7px 3px;font-size:11px;font-weight:600;line-height:16px}.tab.active{background:var(--blue);color:#fff;box-shadow:0 2px 10px rgba(21,101,216,.35)}
+.panelSection{display:none}.panelSection.active{display:block}.card{background:rgba(18,18,20,.94);border:1px solid rgba(140,140,148,.18);border-radius:22px;padding:20px;margin:12px 0;box-shadow:0 5px 24px rgba(0,0,0,.16)}
+.powerCard{min-height:470px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:28px 20px}.brandLogo{width:172px;height:172px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:radial-gradient(circle at 35% 30%,#20f0ce,#00b89f 42%,#1565d8 100%);box-shadow:0 0 0 8px rgba(0,229,192,.06),0 18px 45px rgba(0,229,192,.14);margin:8px auto 16px}.brandLogo span{font-size:94px;font-weight:900;letter-spacing:-12px;color:#09090a;transform:translateX(-5px)}
+.powerState{font-size:15px;font-weight:700;margin:0 0 7px}.powerTime{font-size:14px;color:var(--muted);font-weight:600}.powerBtn{width:100%;max-width:360px;font-size:16px;padding:14px 18px;border-radius:15px;margin-top:20px}.powerOn{background:var(--red)}.powerOff{background:var(--blue)}.powerWait{background:#4a4a4f}.status{font-size:17px}.muted{color:var(--muted)}.ok{color:#4caf50}.warn{color:var(--amber)}
+.metricRow{display:flex;width:100%;margin-top:24px;padding:2px;background:var(--surface2);border:1px solid rgba(140,140,148,.16);border-radius:16px}.metric{flex:1;text-align:center;padding:10px 5px}.metric+.metric{border-left:1px solid rgba(255,255,255,.10)}.metricTitle{font-size:11px;color:#9c9da4}.metricValue{font-size:13px;font-weight:600;margin-top:3px;color:#e7e7eb}
+button{background:var(--blue);color:#fff;border:0;border-radius:12px;padding:11px 16px;font-weight:650;cursor:pointer}button.secondary{background:var(--surface2);color:#ddd}
+input,textarea{width:100%;box-sizing:border-box;background:#0d0d0f;color:#eee;border:1px solid #35353a;border-radius:12px;padding:11px;margin:8px 0}small{color:#999}.row{display:flex;gap:10px;flex-wrap:wrap}code{word-break:break-all;color:#8ab4f8}
+@media(max-width:560px){body{padding:12px 12px 98px}.tabs{width:calc(100% - 18px);bottom:8px}.tab{font-size:10px}.powerCard{min-height:430px}.brandLogo{width:148px;height:148px}.brandLogo span{font-size:80px}}
 </style></head><body>
-<h1>CSQTT-Keenetic</h1><div class="tabs">
+<h1>CSQTT</h1><div class="tabs">
 <button class="tab active" data-section="sec-connect">⏻ Подключение</button>
 <button class="tab" data-section="sec-vk">🔑 VK</button>
 <button class="tab" data-section="sec-deploy">☁️ Деплой</button>
@@ -489,8 +492,14 @@ code{word-break:break-all;color:#9ecbff}
 <button class="tab" data-section="sec-info">ℹ️ Инфо</button>
 </div>
 <div id="sec-connect" class="panelSection active">
-<div class="card powerCard"><div id="powerState" class="powerState muted">○ ОТКЛЮЧЕНО</div><div id="powerTime" class="muted">00:00:00</div><button id="powerBtn" class="powerBtn powerOff" data-enabled="false">🔵 ПОДКЛЮЧИТЬ</button><div id="powerMsg" class="muted" style="margin-top:10px"></div></div>
-</div>
+<div class="card powerCard">
+<div id="brandLogo" class="brandLogo"><span>C</span></div>
+<div id="powerState" class="powerState muted">Отключено</div>
+<div id="powerTime" class="powerTime">00:00:00</div>
+<button id="powerBtn" class="powerBtn powerOff" data-enabled="false">Подключить</button>
+<div id="powerMsg" class="muted" style="margin-top:10px"></div>
+<div class="metricRow"><div class="metric"><div class="metricTitle">Маскировка</div><div id="mObfs" class="metricValue">—</div></div><div class="metric"><div class="metricTitle">Хеши</div><div id="mHash" class="metricValue">—</div></div><div class="metric"><div class="metricTitle">Режим кредов</div><div id="mMode" class="metricValue">—</div></div></div>
+</div></div>
 <div id="sec-vk" class="panelSection">
 <div class="card"><div class="status">VK: <span id="vk" class="warn">проверка…</span></div><div id="uid" class="muted"></div><div id="autoState" class="muted" style="margin-top:10px"></div></div>
 <div class="card">
@@ -598,10 +607,15 @@ async function refresh(){
   const enabled=x.enabled!==false;
   const running=!!rt.client_running;
   const pb=document.getElementById('powerBtn'),ps=document.getElementById('powerState');
-  if(running){ps.textContent='🟢 ПОДКЛЮЧЕНО';ps.className='powerState ok';pb.textContent='🔴 ОТКЛЮЧИТЬ';pb.className='powerBtn powerOn';pb.dataset.enabled='true';if(!powerSince)powerSince=Date.now()}
-  else if(!enabled){ps.textContent='○ ОТКЛЮЧЕНО';ps.className='powerState muted';pb.textContent='🔵 ПОДКЛЮЧИТЬ';pb.className='powerBtn powerOff';pb.dataset.enabled='false';powerSince=0}
-  else{ps.textContent='🟡 ПОДКЛЮЧЕНИЕ…';ps.className='powerState warn';pb.textContent='🔵 ПОДКЛЮЧИТЬ';pb.className='powerBtn powerOff';pb.dataset.enabled='false';powerSince=0}
+  if(running){ps.textContent='Подключено';ps.className='powerState ok';pb.textContent='Отключить';pb.className='powerBtn powerOn';pb.dataset.enabled='true';if(!powerSince)powerSince=Date.now()}
+  else if(!enabled){ps.textContent='Отключено';ps.className='powerState muted';pb.textContent='Подключить';pb.className='powerBtn powerOff';pb.dataset.enabled='false';powerSince=0}
+  else{ps.textContent='Подключение…';ps.className='powerState warn';pb.textContent='Подключить';pb.className='powerBtn powerOff';pb.dataset.enabled='false';powerSince=0}
   document.getElementById('powerTime').textContent=powerSince?fmtTime(Date.now()-powerSince):'00:00:00';
+  const cfg=await fetch('/api/config',{cache:'no-store'}).then(r=>r.json()).catch(()=>({config:{}}));
+  const cc=cfg.config||{};
+  document.getElementById('mObfs').textContent=cc.obfs||'—';
+  document.getElementById('mHash').textContent=x.mode==='manual'?(rt.hashes_received||'Ручные'):'Авто';
+  document.getElementById('mMode').textContent=x.mode==='auto_api'?'Авто API':x.mode==='auto_js'?'Авто ВК':'Ручной';
   const labels={starting:'Запуск manager…',getting_hashes:'Получаю VK hashes…',hashes_received:'Hashes получены',client_started:'Запускаю CSQTT…',client_stopped:'CSQTT остановлен',idle:'Ожидание',error:'Ошибка'};
   let st=labels[rt.stage]||rt.stage||'Ожидание';
   if(rt.stage==='getting_hashes' && rt.calls_requested) st+=' ('+Number(rt.calls_created||0)+'/'+Number(rt.calls_requested)+')';
