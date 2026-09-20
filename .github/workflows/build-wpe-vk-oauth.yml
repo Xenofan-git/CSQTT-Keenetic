@@ -35,7 +35,9 @@ jobs:
             pkg="$1"
             rel="$(get_url "$pkg")"
             test -n "$rel"
-            curl -fsSL "$ENTWARE_BASE/$rel" -o "$RUNNER_TEMP/ipk/$pkg.ipk"
+            curl --http1.1 --compressed -fsSL --retry 4 --retry-all-errors "$ENTWARE_BASE/$rel" -o "$RUNNER_TEMP/ipk/$pkg.ipk"
+            file "$RUNNER_TEMP/ipk/$pkg.ipk"
+            ar t "$RUNNER_TEMP/ipk/$pkg.ipk" >/dev/null
             mkdir -p "$RUNNER_TEMP/ipk/$pkg"
             cd "$RUNNER_TEMP/ipk/$pkg"
             ar x "../$pkg.ipk"
