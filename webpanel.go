@@ -25,7 +25,6 @@ const (
     vkWebAppID = "7793118"
     vkWebScope = "1073737727"
     vkWebRedirect = "https://oauth.vk.ru/blank.html"
-    vkWebCapture = "https://72.56.81.131/api/vk/token"
     vkWebVersion = "5.199"
 )
 
@@ -62,12 +61,29 @@ func startCSQTTWebPanel() {
     }
 }
 
-func vkCallbackURL(r *http.Request) string {
-    scheme := "http"
-    if strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") || r.TLS != nil {
-        scheme = "https"
+func vkRequestScheme(r *http.Request) string {
+    if proto := strings.TrimSpace(strings.Split(r.Header.Get("X-Forwarded-Proto"), ",")[0]); strings.EqualFold(proto, "https") {
+        return "https"
+    } else if strings.EqualFold(proto, "http") {
+        return "http"
     }
-    return scheme + "://" + strings.TrimSpace(r.Host) + "/api/vk/token"
+    if r.TLS != nil {
+        return "https"
+    }
+    host := strings.TrimSpace(r.Host)
+    if _, port, err := net.SplitHostPort(host); err == nil {
+        if port == "2001" || port == "80" {
+            return "http"
+        }
+        if port == "443" {
+            return "https"
+        }
+    }
+    return "https"
+}
+
+func vkCallbackURL(r *http.Request) string {
+    return vkRequestScheme(r) + "://" + strings.TrimSpace(r.Host) + "/api/vk/token"
 }
 
 func vkOAuthURLFor(r *http.Request, state string) string {
@@ -115,15 +131,13 @@ func csqttVKSession(w http.ResponseWriter, r *http.Request) {
         return
     }
     nonce := base64.RawURLEncoding.EncodeToString(b)
-    scheme := "http"
-    if strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") || r.TLS != nil {
-        scheme = "https"
-    }
+    scheme := vkRequestScheme(r)
+    callbackURL := vkCallbackURL(r)
     returnURL := scheme + "://" + strings.TrimSpace(r.Host) + "/"
-    // The VK fragment is only visible to the browser. Use the HTTPS VPS
-    // proxy as the capture endpoint so a local HTTP panel never has to
-    // receive a token from an HTTPS VK page.
-    statePayload := vkWebCapture + "|" + returnURL + "|" + nonce
+    // The VK fragment is visible only on oauth.vk.ru/blank.html. Post it back
+    // to the same CSQTT origin that created this short-lived state. Remote
+    // KeenDNS access stays HTTPS; direct LAN access stays on port 2001.
+    statePayload := callbackURL + "|" + returnURL + "|" + nonce
     state := base64.RawURLEncoding.EncodeToString([]byte(statePayload))
 
     vkTokenMu.Lock()
@@ -426,7 +440,7 @@ code{word-break:break-all;color:#9ecbff}
 <div class="card"><div class="status">VK: <span id="vk" class="warn">проверка…</span></div><div id="uid" class="muted"></div><div id="autoState" class="muted" style="margin-top:10px"></div></div>
 <div class="card">
 <h2>Авторизация VK</h2>
-<p class="muted">VK-приложение 7793118 требует штатный redirect <code>https://oauth.vk.ru/blank.html</code>. После входа VK помещает access_token во фрагмент URL. Браузерный скрипт автоматически забирает его и передаёт в CSQTT через защищённый HTTPS callback — APK и ручной ввод токена не нужны.</p>
+<p class="muted">VK-приложение 7793118 требует штатный redirect <code>https://oauth.vk.ru/blank.html</code>. После входа VK помещает access_token во фрагмент URL. Браузерный скрипт автоматически забирает его и передаёт в CSQTT через callback того же CSQTT-адреса — удалённо по HTTPS через KeenDNS, локально через 192.168.1.1:2001. APK и ручной ввод токена не нужны.</p>
 <div class="row"><button type="button" id="vkLogin">🔐 Войти через VK</button><button class="secondary" onclick="refresh()">Обновить</button></div>
 <div id="msg" class="muted"></div>
 <div style="margin-top:14px">
