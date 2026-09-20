@@ -1,3 +1,1 @@
-# Build information
-
-Run 39 ARM64 client build.
+CSQTT-Keenetic
