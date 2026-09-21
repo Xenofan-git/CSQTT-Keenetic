@@ -96,7 +96,7 @@ jobs:
           set -euxo pipefail
           SYSROOT="$GITHUB_WORKSPACE/sysroot"
           ICU_VERSION=78.2
-          curl -fsSL "https://github.com/unicode-org/icu/releases/download/release-78-2/icu4c-78_2-src.tgz" -o "$RUNNER_TEMP/icu-src.tgz"
+          curl -fsSL "https://github.com/unicode-org/icu/releases/download/release-78-2/icu4c-78.2-sources.tgz" -o "$RUNNER_TEMP/icu-src.tgz"
           mkdir -p "$RUNNER_TEMP/icu-src"
           tar -xzf "$RUNNER_TEMP/icu-src.tgz" -C "$RUNNER_TEMP/icu-src"
           mkdir -p "$SYSROOT/include" "$SYSROOT/lib/pkgconfig"
