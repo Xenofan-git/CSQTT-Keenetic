@@ -66,6 +66,12 @@ jobs:
               ln -sf "$(basename "$so")" "$SYSROOT/lib/lib${lib}.so"
             fi
           done
+          echo "=== HarfBuzz package entries ==="
+          awk 'BEGIN{RS=""} /[Pp]ackage:.*harf|[Ss]ection:.*harf/ {print}' "$RUNNER_TEMP/Packages" | head -80 || true
+          echo "=== HarfBuzz files in sysroot ==="
+          find "$SYSROOT" -type f \( -name "hb.h" -o -name "hb-version.h" -o -name "harfbuzz.pc" \) -print || true
+          echo "=== HarfBuzz libraries ==="
+          find "$SYSROOT" -type f -name "libharfbuzz.so*" -print || true
           du -sh "$SYSROOT"
       - name: Fetch WPE WebKit
         run: |
