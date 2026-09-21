@@ -52,7 +52,7 @@ jobs:
           PORT="${{ secrets.VPS_PORT || 22 }}"
           HOST="${{ secrets.VPS_HOST }}"
           USER="${{ secrets.VPS_USER }}"
-          DEST="${{ secrets.VPS_DEPLOY_PATH || '/opt/csqт-vk-auth' }}"
+          DEST="${{ secrets.VPS_DEPLOY_PATH || '/opt/csqtt-vk-auth' }}"
           test -n "$HOST"
           test -n "$USER"
           ssh -p "$PORT" "$USER@$HOST" "mkdir -p '$DEST'"
