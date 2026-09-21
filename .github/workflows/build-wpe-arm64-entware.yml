@@ -27,17 +27,14 @@ jobs:
           echo "efa9bcc3cb891c2d88f50eec710d9ccee71cbdf1040420361eb98c17355eb452  wpewebkit-2.54.0.tar.xz" | sha256sum -c -
           tar -xf wpewebkit-2.54.0.tar.xz
 
-      - name: Patch WPE 2.54.0 video guard
+      - name: Patch WPE 2.54.0 disabled media binding
         run: |
           python3 - <<'PY'
           from pathlib import Path
           p = Path("wpewebkit-2.54.0/Source/WebCore/bindings/js/JSHTMLMediaElementCustom.cpp")
-          s = p.read_text()
-          marker = '#include "config.h"\\n'
-          if "#if ENABLE(VIDEO)" not in s:
-              s = s.replace(marker, marker + "\\n#if ENABLE(VIDEO)\\n", 1)
-              s = s.rstrip() + "\\n\\n#endif /* ENABLE(VIDEO) */\\n"
-          p.write_text(s)
+          # WPE 2.54.0 can still compile this custom binding with media disabled.
+          # The generated JSHTMLMediaElement class is absent in this configuration.
+          p.write_text('#include "config.h"\\n#if 0 /* media disabled for headless auth build */\\n#endif\\n')
           PY
 
       - name: Configure native WPE headless build
