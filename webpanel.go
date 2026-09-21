@@ -451,7 +451,14 @@ func csqttSetVKMode(w http.ResponseWriter, r *http.Request) {
         return
     }
     log.Printf("CSQTT Web Panel: VK hash mode changed to %s", mode)
-    writeJSON(w, map[string]any{"ok": true, "mode": mode})
+    // Manager reads VK hash mode at process start. Restart the manager after
+    // saving so a mode/hash change is applied immediately without rebooting
+    // the router. The service supervisor will bring it back.
+    go func() {
+        time.Sleep(350 * time.Millisecond)
+        _ = syscall.Kill(os.Getpid(), syscall.SIGTERM)
+    }()
+    writeJSON(w, map[string]any{"ok": true, "mode": mode, "restart_pending": true})
 }
 
 func csqttVKStatus(w http.ResponseWriter, r *http.Request) {
@@ -486,6 +493,8 @@ func csqttVKStatus(w http.ResponseWriter, r *http.Request) {
         "mode": mode,
         "enabled": enabled,
         "runtime": runtime,
+        "hash_notice": runtime["hash_notice"],
+        "hash_notice_at": runtime["hash_notice_at"],
     })
 }
 
@@ -596,7 +605,9 @@ input,textarea{width:100%;box-sizing:border-box;background:#fff;color:#222;borde
 details{background:#f7f7f8;border-radius:15px;padding:10px 12px}summary{font-weight:650;cursor:pointer}
 @media(prefers-color-scheme:dark){:root{color-scheme:dark;--bg:#09090a;--surface:#121214;--surface2:#202024;--text:#fafafa;--muted:#c9c9cf;--blue:#1565d8;--blueSoft:#173b72;--line:#35353a}body{background:radial-gradient(circle at 50% 12%,#14151a 0,#09090a 45%)}.topbar .brand{color:#4aa0ff}.version{color:#8ab4f8}.chat{border-color:#4aa0ff;color:#4aa0ff}.card{background:rgba(18,18,20,.96);border-color:rgba(140,140,148,.18);box-shadow:0 5px 24px rgba(0,0,0,.25)}.tabs{background:rgba(16,17,20,.97);border-color:rgba(140,140,148,.24)}.tab{color:#8d8f96}.tab.active{color:#fff}.brandLogo{background:radial-gradient(circle at 35% 30%,#173b72,#121214);border-color:#35353a}.brandLogo span{color:#4aa0ff}.metricRow,details{background:#202024}.metricTitle{color:#9c9da4}.metricValue{color:#e7e7eb}button.secondary{background:#202024;color:#ddd}input,textarea{background:#0d0d0f;color:#eee;border-color:#35353a}}
 @media(max-width:560px){body{padding:10px 10px 112px}.topbar{padding-bottom:12px}.brand{font-size:31px}.tabs{width:calc(100% - 14px);bottom:8px;height:82px}.tab{font-size:13px;line-height:17px}.tabIcon{width:29px;height:29px}.tabIcon svg{width:27px;height:27px}.powerCard{min-height:500px;padding:24px 16px}.brandLogo{width:148px;height:148px}.brandLogo span{font-size:80px}}
-.card{animation:cardIn .38s ease both}.panelSection.active .card:nth-child(2){animation-delay:.05s}.panelSection.active .card:nth-child(3){animation-delay:.1s}.tabs{box-shadow:0 8px 28px rgba(0,0,0,.10);backdrop-filter:blur(12px)}.tab{transition:color .2s,background .2s,transform .2s}.tab:hover{transform:translateY(-1px)}.powerCard{overflow:hidden;position:relative}.powerCard:before{content:"";position:absolute;width:260px;height:260px;border-radius:50%;background:radial-gradient(circle,rgba(25,118,210,.16),transparent 68%);top:25px;left:50%;transform:translateX(-50%);animation:pulseGlow 3.2s ease-in-out infinite}.brandLogo{animation:logoFloat 3.5s ease-in-out infinite}.brandLogo span{animation:logoShine 2.8s ease-in-out infinite}.tokenManual{background:transparent!important;border:0!important;box-shadow:none!important;padding:0!important;margin-top:18px!important}.tokenAlert{backdrop-filter:blur(7px);animation:fadeIn .2s ease}.tokenAlert.show .tokenAlertBox{animation:modalIn .28s cubic-bezier(.2,.8,.2,1)}.tokenAlertBox{border:1px solid rgba(211,47,47,.18)}.tokenAlertTitle:before{content:"";display:inline-block;width:10px;height:10px;border-radius:50%;background:#d32f2f;margin-right:9px;box-shadow:0 0 0 5px rgba(211,47,47,.12);animation:alertPulse 1.5s infinite}.tokenAlertActions button{min-width:150px}.tokenAlertActions button.secondary{box-shadow:none;background:#edf0f4;color:#333}.vkTokenInput{}#vkTokenInput{display:block;width:100%;min-width:100%;min-height:56px;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:14px;padding:15px 16px}.status{transition:all .25s ease}.ok{color:#19a463!important}.warn{color:#d97706!important}@keyframes cardIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}@keyframes fadeIn{from{opacity:0}to{opacity:1}}@keyframes modalIn{from{opacity:0;transform:translateY(18px) scale(.97)}to{opacity:1;transform:none}}@keyframes logoFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-5px)}}@keyframes logoShine{0%,100%{filter:brightness(1)}50%{filter:brightness(1.18)}}@keyframes pulseGlow{0%,100%{opacity:.55;transform:translateX(-50%) scale(1)}50%{opacity:1;transform:translateX(-50%) scale(1.12)}}@keyframes alertPulse{0%,100%{opacity:1}50%{opacity:.45}}@media(prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important}}</style></head><body>
+.card{animation:cardIn .38s ease both}.panelSection.active .card:nth-child(2){animation-delay:.05s}.panelSection.active .card:nth-child(3){animation-delay:.1s}.tabs{box-shadow:0 8px 28px rgba(0,0,0,.10);backdrop-filter:blur(12px)}.tab{transition:color .2s,background .2s,transform .2s}.tab:hover{transform:translateY(-1px)}.powerCard{overflow:hidden;position:relative}.powerCard:before{content:"";position:absolute;width:260px;height:260px;border-radius:50%;background:radial-gradient(circle,rgba(25,118,210,.16),transparent 68%);top:25px;left:50%;transform:translateX(-50%);animation:pulseGlow 3.2s ease-in-out infinite}.brandLogo{animation:logoFloat 3.5s ease-in-out infinite}.brandLogo span{animation:logoShine 2.8s ease-in-out infinite}.tokenManual{background:transparent!important;border:0!important;box-shadow:none!important;padding:0!important;margin-top:18px!important}.tokenAlert{backdrop-filter:blur(7px);animation:fadeIn .2s ease}.tokenAlert.show .tokenAlertBox{animation:modalIn .28s cubic-bezier(.2,.8,.2,1)}.tokenAlertBox{border:1px solid rgba(211,47,47,.18)}.hashManager{margin-top:18px;border:1px solid rgba(80,82,90,.14);border-radius:22px;padding:16px;background:linear-gradient(180deg,rgba(247,249,252,.96),rgba(239,242,247,.82));overflow:hidden}.hashSummary{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:13px}.hashPill{border-radius:16px;padding:10px 8px;text-align:center;background:#fff;border:1px solid rgba(80,82,90,.11);box-shadow:0 3px 10px rgba(0,0,0,.05);transition:transform .22s ease,box-shadow .22s ease}.hashPill:hover{transform:translateY(-1px);box-shadow:0 7px 16px rgba(0,0,0,.08)}.hashPillValue{display:block;font-size:21px;font-weight:800;line-height:24px}.hashPillLabel{display:block;font-size:11px;color:#777980;margin-top:3px}.hashPill.active .hashPillValue{color:#19a463}.hashPill.dead .hashPillValue{color:#d32f2f}.hashPill.total .hashPillValue{color:#1976d2}.hashList{display:grid;gap:8px;margin:12px 0 15px}.hashItem{display:flex;align-items:center;gap:10px;padding:11px 12px;border-radius:16px;background:rgba(255,255,255,.86);border:1px solid rgba(80,82,90,.11);animation:hashIn .35s cubic-bezier(.2,.8,.2,1) both}.hashItem.dead{border-color:rgba(211,47,47,.24);background:linear-gradient(90deg,rgba(211,47,47,.08),rgba(255,255,255,.88))}.hashDot{width:9px;height:9px;border-radius:50%;flex:0 0 auto;background:#19a463;box-shadow:0 0 0 5px rgba(25,164,99,.10);animation:hashPulse 2s ease-in-out infinite}.hashItem.dead .hashDot{background:#d32f2f;box-shadow:0 0 0 5px rgba(211,47,47,.10);animation:hashDeadPulse 1.5s ease-in-out infinite}.hashText{font:600 13px ui-monospace,SFMono-Regular,Consolas,monospace;word-break:break-all;flex:1}.hashStatus{font-size:12px;font-weight:700;color:#19a463;white-space:nowrap}.hashItem.dead .hashStatus{color:#d32f2f}.hashEmpty{padding:15px;border:1px dashed #c8ccd4;border-radius:16px;text-align:center;color:#7b7f88;font-size:13px}.hashNotice{display:flex;gap:11px;align-items:flex-start;padding:13px 14px;border-radius:17px;margin:12px 0;background:linear-gradient(90deg,rgba(255,179,0,.12),rgba(255,255,255,.6));border:1px solid rgba(217,130,0,.2);animation:noticeIn .35s cubic-bezier(.2,.8,.2,1)}.hashNotice.danger{background:linear-gradient(90deg,rgba(211,47,47,.12),rgba(255,255,255,.6));border-color:rgba(211,47,47,.24)}.hashNoticeIcon{font-size:22px;line-height:1}.hashNoticeTitle{font-weight:800}.hashNoticeText{font-size:13px;color:#666a73;margin-top:3px;line-height:1.4}.hashEditorLabel{display:flex;justify-content:space-between;gap:8px;align-items:center}.hashCounter{font-size:12px;color:#7c8088}.hashHelp{font-size:12px;color:#777980;margin:4px 0 0;line-height:1.4}.hashSaveRow{display:flex;align-items:center;gap:10px;margin-top:10px}.hashSaveRow button{flex:1}.hashSaveState{font-size:12px;color:#6d717a}.hashToast{position:fixed;z-index:100;left:50%;top:16px;transform:translateX(-50%) translateY(-18px);width:min(620px,calc(100% - 28px));padding:13px 15px;border-radius:18px;background:rgba(20,22,27,.96);color:#fff;box-shadow:0 12px 38px rgba(0,0,0,.28);border:1px solid rgba(255,255,255,.12);opacity:0;pointer-events:none;transition:opacity .25s ease,transform .3s cubic-bezier(.2,.8,.2,1);display:flex;gap:11px;align-items:flex-start}.hashToast.show{opacity:1;transform:translateX(-50%) translateY(0)}.hashToast.danger{border-color:rgba(255,100,100,.35)}.hashToastIcon{font-size:22px}.hashToastTitle{font-weight:800}.hashToastText{font-size:13px;color:#c7cad0;margin-top:2px;line-height:1.35}
+@media(prefers-color-scheme:dark){.hashManager{background:linear-gradient(180deg,rgba(30,31,35,.96),rgba(25,26,30,.9));border-color:rgba(140,140,148,.18)}.hashPill,.hashItem{background:rgba(28,29,33,.9);border-color:rgba(140,140,148,.16)}.hashItem.dead{background:linear-gradient(90deg,rgba(211,47,47,.12),rgba(28,29,33,.9))}.hashNotice{background:linear-gradient(90deg,rgba(255,179,0,.10),rgba(28,29,33,.75))}.hashNotice.danger{background:linear-gradient(90deg,rgba(211,47,47,.13),rgba(28,29,33,.75))}.hashToast{background:rgba(20,22,27,.97)}}
+@keyframes hashIn{from{opacity:0;transform:translateX(-7px) scale(.985)}to{opacity:1;transform:none}}@keyframes hashPulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.55;transform:scale(.86)}}@keyframes hashDeadPulse{0%,100%{opacity:1}50%{opacity:.45}}@keyframes noticeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}.tokenAlertTitle:before{content:"";display:inline-block;width:10px;height:10px;border-radius:50%;background:#d32f2f;margin-right:9px;box-shadow:0 0 0 5px rgba(211,47,47,.12);animation:alertPulse 1.5s infinite}.tokenAlertActions button{min-width:150px}.tokenAlertActions button.secondary{box-shadow:none;background:#edf0f4;color:#333}.vkTokenInput{}#vkTokenInput{display:block;width:100%;min-width:100%;min-height:56px;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:14px;padding:15px 16px}.status{transition:all .25s ease}.ok{color:#19a463!important}.warn{color:#d97706!important}@keyframes cardIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}@keyframes fadeIn{from{opacity:0}to{opacity:1}}@keyframes modalIn{from{opacity:0;transform:translateY(18px) scale(.97)}to{opacity:1;transform:none}}@keyframes logoFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-5px)}}@keyframes logoShine{0%,100%{filter:brightness(1)}50%{filter:brightness(1.18)}}@keyframes pulseGlow{0%,100%{opacity:.55;transform:translateX(-50%) scale(1)}50%{opacity:1;transform:translateX(-50%) scale(1.12)}}@keyframes alertPulse{0%,100%{opacity:1}50%{opacity:.45}}@media(prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important}}</style></head><body>
 <div class="topbar"><div class="brand">CSQTT</div><div class="version">v2.2.0by amurcanov</div><div class="chat">•••</div></div><nav class="tabs" aria-label="Навигация">
 <button class="tab active" data-section="sec-connect"><span class="tabIcon"><svg viewBox="0 0 24 24"><path d="M12 3v9"/><path d="M7.05 5.05a8 8 0 1 0 9.9 0"/></svg></span><span>Подкл.</span></button>
 <button class="tab" data-section="sec-vk"><span class="tabIcon"><svg viewBox="0 0 24 24"><circle cx="7" cy="12" r="3"/><path d="M10 12h11"/><path d="M18 12v3"/><path d="M15 12v2"/></svg></span><span>Туннель</span></button>
@@ -657,9 +668,18 @@ details{background:#f7f7f8;border-radius:15px;padding:10px 12px}summary{font-wei
 <label><input type="radio" name="hashMode" value="manual" onchange="modeChanged()"> Ручной — вставить VK hashes</label>
 <label><input type="radio" name="hashMode" value="auto_api" onchange="modeChanged()"> Авто API — calls.start</label>
 <label><input type="radio" name="hashMode" value="auto_js" onchange="modeChanged()"> Авто ВК — VK Calls / vchat</label>
-<div id="manualHashes" style="display:none">
-  <label>VK hashes (по одному на строку)</label>
-  <textarea id="hashes" rows="6" style="width:100%;box-sizing:border-box;background:#101010;color:#eee;border:1px solid #444;border-radius:10px;padding:11px"></textarea>
+<div id="manualHashes" style="display:none" class="hashManager">
+  <div class="hashSummary">
+    <div class="hashPill active"><span id="hashActiveCount" class="hashPillValue">0</span><span class="hashPillLabel">активны</span></div>
+    <div class="hashPill dead"><span id="hashDeadCount" class="hashPillValue">0</span><span class="hashPillLabel">недоступны</span></div>
+    <div class="hashPill total"><span id="hashTotalCount" class="hashPillValue">0</span><span class="hashPillLabel">всего</span></div>
+  </div>
+  <div id="hashNotice" class="hashNotice" style="display:none"></div>
+  <div id="hashList" class="hashList"></div>
+  <div class="hashEditorLabel"><label for="hashes"><b>Ручные VK hashes</b></label><span id="hashCounter" class="hashCounter">0 / 6</span></div>
+  <textarea id="hashes" rows="6" placeholder="Вставь по одному VK hash на строку"></textarea>
+  <div class="hashHelp">Один хеш может перестать работать. Он будет отмечен как недоступный, а остальные продолжат работать. Если недоступны все — туннель остановится и панель покажет уведомление.</div>
+  <div class="hashSaveRow"><button onclick="saveMode()">💾 Сохранить хеши и режим</button><span id="hashSaveState" class="hashSaveState"></span></div>
 </div>
 <div class="row"><button onclick="saveMode()">Сохранить режим</button></div>
 <div id="modeMsg" class="muted"></div>
@@ -785,20 +805,66 @@ async function refresh(){
   if(rt.client_started) st+=' ✓';
   if(rt.error) st+=' — '+rt.error;
   document.getElementById('autoState').textContent='Auto VK: '+st;
+  renderHashRuntime(rt);
+  renderHashNotice(rt);
+  showHashToast(rt);
   document.querySelectorAll('input[name=hashMode]').forEach(e=>e.checked=e.value===x.mode);
   modeChanged();
+}
+function maskHashForUI(v){return String(v||'').trim()}
+function renderHashRuntime(rt){
+  const total=Number(rt.hash_total||0), active=Number(rt.hash_active||0), dead=Number(rt.hash_unavailable||Math.max(0,total-active));
+  const ac=document.getElementById('hashActiveCount'),dc=document.getElementById('hashDeadCount'),tc=document.getElementById('hashTotalCount');
+  if(ac)ac.textContent=active; if(dc)dc.textContent=dead; if(tc)tc.textContent=total;
+  const list=document.getElementById('hashList'); if(!list)return;
+  const hashes=Array.isArray(rt.hashes)?rt.hashes:[];
+  if(!hashes.length){list.innerHTML='<div class="hashEmpty">Пока нет данных о хешах. Добавь ручные хеши ниже и сохрани режим.</div>';return}
+  list.innerHTML=hashes.map((h,i)=>'<div class="hashItem '+(h.available?'':'dead')+'" style="animation-delay:'+Math.min(i*45,360)+'ms"><span class="hashDot"></span><span class="hashText">'+escapeHTML(h.hash||'hash')+'</span><span class="hashStatus">'+(h.available?'АКТИВЕН':'ОТКЛЮЧЁН')+'</span></div>').join('');
+}
+function escapeHTML(v){return String(v).replace(/[&<>"']/g,function(c){return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]})}
+let hashToastTimer=0;
+function showHashToast(rt){
+  const notice=String(rt.hash_notice||'').trim(); if(!notice)return;
+  const stamp=String(rt.hash_notice_at||''); if(!stamp)return;
+  const key='csqtt_hash_notice_seen';
+  let seen=''; try{seen=localStorage.getItem(key)||''}catch(e){}
+  if(seen===stamp)return;
+  let t=document.getElementById('hashToast');
+  if(!t){t=document.createElement('div');t.id='hashToast';t.className='hashToast';document.body.appendChild(t)}
+  const danger=Number(rt.hash_active||0)===0||rt.error==='all configured VK hashes are unavailable'||rt.token_invalid;
+  t.className='hashToast '+(danger?'danger':'');
+  t.innerHTML='<span class="hashToastIcon">'+(danger?'⛔':'⚠️')+'</span><div><div class="hashToastTitle">'+(danger?'Изменение VK хешей':'Статус VK хешей изменился')+'</div><div class="hashToastText">'+escapeHTML(notice)+'</div></div>';
+  requestAnimationFrame(()=>t.classList.add('show'));
+  clearTimeout(hashToastTimer); hashToastTimer=setTimeout(()=>t.classList.remove('show'),6500);
+  try{localStorage.setItem(key,stamp)}catch(e){}
+}
+function renderHashNotice(rt){
+  const box=document.getElementById('hashNotice'); if(!box)return;
+  const notice=String(rt.hash_notice||'').trim();
+  if(!notice){box.style.display='none';box.innerHTML='';return}
+  const danger=Number(rt.hash_active||0)===0||rt.error==='all configured VK hashes are unavailable'||rt.token_invalid;
+  box.className='hashNotice '+(danger?'danger':'');
+  box.style.display='flex';
+  box.innerHTML='<span class="hashNoticeIcon">'+(danger?'⛔':'⚠️')+'</span><div><div class="hashNoticeTitle">'+(danger?'Туннель требует внимания':'Изменение статуса хешей')+'</div><div class="hashNoticeText">'+escapeHTML(notice)+'</div></div>';
+}
+function updateHashCounter(){
+  const el=document.getElementById('hashCounter'); const input=document.getElementById('hashes'); if(!el||!input)return;
+  const n=input.value.split(/\r?\n/).map(x=>x.trim()).filter(Boolean).length;
+  el.textContent=n+' / 6';
 }
 function modeChanged(){
   let m=document.querySelector('input[name=hashMode]:checked')?.value||'auto_api';
   document.getElementById('manualHashes').style.display=m==='manual'?'block':'none';
+  if(m==='manual'){updateHashCounter(); const input=document.getElementById('hashes'); if(input&&!input.dataset.bound){input.addEventListener('input',updateHashCounter);input.dataset.bound='1'}}
 }
 async function saveMode(){
   let mode=document.querySelector('input[name=hashMode]:checked')?.value||'auto_api';
   let hashes=mode==='manual'?document.getElementById('hashes').value.split(/\\r?\\n/).map(x=>x.trim()).filter(Boolean):[];
   let r=await fetch('/api/vk/mode',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:mode,hashes:hashes})});
   let x=await r.json();
-  document.getElementById('modeMsg').textContent=x.ok?'Режим сохранён: '+x.mode:'Ошибка: '+(x.error||'unknown');
-  if(x.ok)refresh();
+  document.getElementById('modeMsg').textContent=x.ok?'Режим сохранён: '+x.mode+(x.restart_pending?' · перезапускаю manager…':''):'Ошибка: '+(x.error||'unknown');
+  const hs=document.getElementById('hashSaveState'); if(hs&&x.ok)hs.textContent='✓ Сохранено';
+  if(x.ok)setTimeout(refresh,900);
 }
 refresh();
 </script></body></html>`))
