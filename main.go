@@ -184,6 +184,16 @@ func autoCallCount(workers int) int {
 
 type vkStartedCall struct { CallID string; Hash string }
 type vkAPIError struct { Code int `json:"error_code"`; Msg string `json:"error_msg"` }
+
+type vkTokenInvalidError struct {
+    Code int
+    Msg  string
+}
+func (e *vkTokenInvalidError) Error() string { return fmt.Sprintf("VK token invalid: code=%d %s", e.Code, e.Msg) }
+func isVKTokenInvalidError(err error) bool {
+    var target *vkTokenInvalidError
+    return errors.As(err, &target)
+}
 type vkResponse struct { Response struct { CallID string `json:"call_id"`; Hash string `json:"ok_join_link"`; Join string `json:"join_link"` } `json:"response"`; Error *vkAPIError `json:"error"` }
 
 func extractVKHash(okJoinLink, joinLink string) (string, error) {
@@ -223,6 +233,29 @@ func vkStartCall(token string) (vkStartedCall, *vkAPIError, error) {
     hash, err := extractVKHash(out.Response.Hash, out.Response.Join)
     if err != nil { return vkStartedCall{}, nil, err }
     return vkStartedCall{CallID: out.Response.CallID, Hash: hash}, nil, nil
+}
+
+func finishVKCalls(token string, callIDs []string) {
+    token = strings.TrimSpace(token)
+    if token == "" || len(callIDs) == 0 { return }
+    for _, callID := range callIDs {
+        if err := vkFinishCall(token, callID); err != nil { log.Printf("VK Auto API: finish %s: %v", callID, err) }
+    }
+}
+
+func clearVKAccessToken(configPath string) error {
+    b, err := os.ReadFile(configPath)
+    if err != nil { return err }
+    var cfg map[string]any
+    if err := json.Unmarshal(b, &cfg); err != nil { return err }
+    delete(cfg, "vk_access_token")
+    delete(cfg, "vk_user_id")
+    delete(cfg, "vk_token_expires_in")
+    out, err := json.MarshalIndent(cfg, "", "  ")
+    if err != nil { return err }
+    tmp := configPath + ".tmp"
+    if err := os.WriteFile(tmp, append(out, '\n'), 0600); err != nil { return err }
+    return os.Rename(tmp, configPath)
 }
 
 func vkFinishCall(token, callID string) error {
@@ -282,7 +315,9 @@ func resolveAutoAPI(c Config) ([]string, []string, error) {
             call, apiErr, err := vkStartCall(token)
             if err == nil && apiErr == nil { started = call; lastErr = nil; break }
             if apiErr != nil {
-                if apiErr.Code == 4 || apiErr.Code == 5 || apiErr.Code == 27 || apiErr.Code == 28 { return nil, nil, fmt.Errorf("VK token invalid: code=%d %s", apiErr.Code, apiErr.Msg) }
+                if apiErr.Code == 4 || apiErr.Code == 5 || apiErr.Code == 27 || apiErr.Code == 28 {
+                    return hashes, callIDs, &vkTokenInvalidError{Code: apiErr.Code, Msg: apiErr.Msg}
+                }
                 lastErr = fmt.Errorf("VK API code=%d %s", apiErr.Code, apiErr.Msg)
             } else { lastErr = err }
             if attempt < 2 { time.Sleep(100 * time.Millisecond) }
@@ -294,6 +329,29 @@ func resolveAutoAPI(c Config) ([]string, []string, error) {
     }
     if len(hashes) == 0 { return nil, nil, fmt.Errorf("VK Auto API created no calls") }
     return hashes, callIDs, nil
+}
+
+type vkHashRuntimeState struct {
+    Hash string `json:"hash"`
+    Available bool `json:"available"`
+    Code int `json:"code,omitempty"`
+    Reason string `json:"reason,omitempty"`
+    UpdatedAt string `json:"updated_at"`
+}
+func maskVKHash(hash string) string {
+    hash = strings.TrimSpace(hash)
+    if len(hash) <= 12 { return hash }
+    return hash[:6] + "…" + hash[len(hash)-4:]
+}
+func buildHashRuntime(c Config, unavailable map[string]bool, code int, reason, changedHash string) []vkHashRuntimeState {
+    now := time.Now().UTC().Format(time.RFC3339)
+    out := make([]vkHashRuntimeState, 0, len(c.VKHashes))
+    for _, h := range c.VKHashes {
+        item := vkHashRuntimeState{Hash: maskVKHash(h), Available: !unavailable[h], UpdatedAt: now}
+        if h == changedHash { item.Code = code; item.Reason = strings.TrimSpace(reason) }
+        out = append(out, item)
+    }
+    return out
 }
 
 func resolveAutoJSBootstrap(c Config) (string, error) {
@@ -323,6 +381,7 @@ type clientEvent struct {
     Hash string
     Code int
     Active int
+    Reason string
 }
 
 func parseClientEvent(line string) (clientEvent, bool) {
@@ -335,9 +394,10 @@ func parseClientEvent(line string) (clientEvent, bool) {
         Hash string `json:"hash"`
         Code int `json:"code"`
         Active int `json:"active"`
+        Reason string `json:"reason"`
     }
     if err := json.Unmarshal([]byte(rest[p+1:]), &payload); err != nil { return clientEvent{}, false }
-    return clientEvent{Kind: rest[:p], Hash: strings.TrimSpace(payload.Hash), Code: payload.Code, Active: payload.Active}, true
+    return clientEvent{Kind: rest[:p], Hash: strings.TrimSpace(payload.Hash), Code: payload.Code, Active: payload.Active, Reason: strings.TrimSpace(payload.Reason)}, true
 }
 
 func waitForTUNCONF(lines <-chan string, timeout time.Duration) (string, error) {
@@ -366,6 +426,15 @@ type vkRuntimeState struct {
     CallsRequested int `json:"calls_requested"`
     CallsCreated int `json:"calls_created"`
     HashesReceived int `json:"hashes_received"`
+    HashTotal int `json:"hash_total"`
+    HashActive int `json:"hash_active"`
+    HashUnavailable int `json:"hash_unavailable"`
+    HashChanged string `json:"hash_changed,omitempty"`
+    HashNotice string `json:"hash_notice,omitempty"`
+    HashNoticeAt string `json:"hash_notice_at,omitempty"`
+    Hashes []vkHashRuntimeState `json:"hashes,omitempty"`
+    TokenInvalid bool `json:"token_invalid,omitempty"`
+    TokenInvalidCode int `json:"token_invalid_code,omitempty"`
     ClientStarted bool `json:"client_started"`
     ClientRunning bool `json:"client_running"`
     Error string `json:"error,omitempty"`
@@ -444,6 +513,11 @@ func main() {
 
     var autoCallIDs []string
     runtime := vkRuntimeState{Mode: c.VKHashMode, Stage: "starting"}
+    if c.VKHashMode == "manual" {
+        runtime.HashTotal = len(c.VKHashes)
+        runtime.HashActive = len(c.VKHashes)
+        runtime.Hashes = buildHashRuntime(c, map[string]bool{}, 0, "", "")
+    }
     writeVKRuntime(c, runtime)
     if managerVKHashMode == "auto_api" {
         runtime.Stage = "getting_hashes"
@@ -451,6 +525,17 @@ func main() {
         writeVKRuntime(c, runtime)
         c.VKHashes, autoCallIDs, err = resolveAutoAPI(c)
         if err != nil {
+            finishVKCalls(resolveAutoAPIToken(c), autoCallIDs)
+            if isVKTokenInvalidError(err) {
+                var inv *vkTokenInvalidError
+                if errors.As(err, &inv) {
+                    runtime.TokenInvalid = true
+                    runtime.TokenInvalidCode = inv.Code
+                    runtime.HashNotice = fmt.Sprintf("VK токен недействителен (код %d). Требуется повторная авторизация.", inv.Code)
+                    runtime.HashNoticeAt = time.Now().UTC().Format(time.RFC3339)
+                }
+                _ = clearVKAccessToken(*configPath)
+            }
             runtime.Stage = "error"
             runtime.Error = err.Error()
             writeVKRuntime(c, runtime)
@@ -481,14 +566,17 @@ func main() {
     log.Printf("TUN created: %s fd=%d mtu=%d", tunName, tun.Fd(), tunMTU)
 
     finishAutoCalls := func(callIDs []string) {
-        if len(callIDs) == 0 { return }
-        token := resolveAutoAPIToken(c)
-        for _, callID := range callIDs {
-            if err := vkFinishCall(token, callID); err != nil { log.Printf("VK Auto API: finish %s: %v", callID, err) }
-        }
+        finishVKCalls(resolveAutoAPIToken(c), callIDs)
     }
 
     unavailableManual := map[string]bool{}
+    if managerVKHashMode == "manual" {
+        runtime.HashTotal = len(c.VKHashes)
+        runtime.HashActive = len(c.VKHashes)
+        runtime.HashUnavailable = 0
+        runtime.Hashes = buildHashRuntime(c, unavailableManual, 0, "", "")
+        writeVKRuntime(c, runtime)
+    }
     for {
         // The web panel and Keenetic's native connection switch control the same
         // persistent enabled flag. When disabled, keep the manager/web panel alive
@@ -527,6 +615,17 @@ func main() {
             var callErr error
             c.VKHashes, autoCallIDs, callErr = resolveAutoAPI(c)
             if callErr != nil {
+                finishAutoCalls(autoCallIDs)
+                if isVKTokenInvalidError(callErr) {
+                    var inv *vkTokenInvalidError
+                    if errors.As(callErr, &inv) {
+                        runtime.TokenInvalid = true
+                        runtime.TokenInvalidCode = inv.Code
+                        runtime.HashNotice = fmt.Sprintf("VK токен недействителен (код %d). Требуется повторная авторизация.", inv.Code)
+                        runtime.HashNoticeAt = time.Now().UTC().Format(time.RFC3339)
+                    }
+                    _ = clearVKAccessToken(*configPath)
+                }
                 runtime.Stage = "error"
                 runtime.Error = callErr.Error()
                 writeVKRuntime(c, runtime)
@@ -536,6 +635,12 @@ func main() {
             runtime.Stage = "hashes_received"
             runtime.CallsCreated = len(autoCallIDs)
             runtime.HashesReceived = len(c.VKHashes)
+            runtime.HashTotal = len(c.VKHashes)
+            runtime.HashActive = len(c.VKHashes)
+            runtime.HashUnavailable = 0
+            runtime.HashNotice = ""
+            runtime.HashChanged = ""
+            runtime.Hashes = nil
             c.AllowHashRedistribution = len(autoCallIDs) < runtime.CallsRequested
             writeVKRuntime(c, runtime)
             c.VKHashMode = "manual"
@@ -627,10 +732,43 @@ func main() {
                 if !ok { events = nil; continue }
                 switch ev.Kind {
                 case "CALL_UNAVAILABLE":
-                    if c.VKHashMode == "manual" && !c.AllowHashRedistribution {
-                        unavailableManual[ev.Hash] = true
-                        log.Printf("VK hash unavailable in manual mode: %s code=%d", ev.Hash, ev.Code)
-                    } else { select { case recovery <- "call_unavailable": default: } }
+                    if managerVKHashMode == "manual" && !c.AllowHashRedistribution {
+                        if ev.Hash != "" { unavailableManual[ev.Hash] = true }
+                        active := len(c.VKHashes) - len(unavailableManual)
+                        if active < 0 { active = 0 }
+                        runtime.HashTotal = len(c.VKHashes)
+                        runtime.HashActive = active
+                        runtime.HashUnavailable = len(unavailableManual)
+                        runtime.HashChanged = maskVKHash(ev.Hash)
+                        runtime.HashNotice = fmt.Sprintf("Хеш стал недоступен%s", func() string {
+                            if ev.Code != 0 { return fmt.Sprintf(" · код %d", ev.Code) }
+                            return ""
+                        }())
+                        runtime.HashNoticeAt = time.Now().UTC().Format(time.RFC3339)
+                        runtime.Hashes = buildHashRuntime(c, unavailableManual, ev.Code, ev.Reason, ev.Hash)
+                        writeVKRuntime(c, runtime)
+                        log.Printf("VK hash unavailable in manual mode: %s code=%d active=%d/%d", ev.Hash, ev.Code, active, len(c.VKHashes))
+                        if active == 0 {
+                            runtime.Stage = "error"
+                            runtime.Error = "all configured VK hashes are unavailable"
+                            runtime.HashNotice = "Все ручные VK хеши недоступны. Туннель остановлен — добавьте новые хеши."
+                            runtime.HashNoticeAt = time.Now().UTC().Format(time.RFC3339)
+                            writeVKRuntime(c, runtime)
+                            stopCurrentClient()
+                            sessionEnded = true
+                        }
+                    } else if managerVKHashMode == "auto_api" || managerVKHashMode == "auto_js" {
+                        runtime.HashChanged = maskVKHash(ev.Hash)
+                        runtime.HashNotice = fmt.Sprintf("Автоматический VK хеш недоступен%s — получаю замену.", func() string {
+                            if ev.Code != 0 { return fmt.Sprintf(" · код %d", ev.Code) }
+                            return ""
+                        }())
+                        runtime.HashNoticeAt = time.Now().UTC().Format(time.RFC3339)
+                        writeVKRuntime(c, runtime)
+                        select { case recovery <- "call_unavailable": default: }
+                    } else {
+                        select { case recovery <- "call_unavailable": default: }
+                    }
                 case "ACTIVE_ZERO":
                     if zeroTimer == nil { zeroTimer = time.NewTimer(4*time.Second); zeroC = zeroTimer.C }
                 case "STATS":
@@ -658,10 +796,21 @@ func main() {
         finishAutoCalls(autoCallIDs); autoCallIDs=nil
 
         if managerVKHashMode == "manual" && len(unavailableManual) > 0 {
-            filtered := make([]string,0,len(c.VKHashes))
-            for _, h := range c.VKHashes { if !unavailableManual[h] { filtered=append(filtered,h) } }
-            c.VKHashes=filtered
-            if len(c.VKHashes)==0 { runtime.Stage="error"; runtime.Error="all configured VK hashes are unavailable"; writeVKRuntime(c,runtime); _=ip("link","set","dev",tunName,"down"); waitForManagerShutdown(ctx,runtime.Error); return }
+            active := len(c.VKHashes) - len(unavailableManual)
+            if active <= 0 {
+                runtime.Stage="error"
+                runtime.Error="all configured VK hashes are unavailable"
+                runtime.HashTotal=len(c.VKHashes)
+                runtime.HashActive=0
+                runtime.HashUnavailable=len(unavailableManual)
+                runtime.HashNotice="Все ручные VK хеши недоступны. Туннель остановлен — добавьте новые хеши."
+                runtime.HashNoticeAt=time.Now().UTC().Format(time.RFC3339)
+                runtime.Hashes=buildHashRuntime(c, unavailableManual, 0, "", "")
+                writeVKRuntime(c,runtime)
+                _=ip("link","set","dev",tunName,"down")
+                waitForManagerShutdown(ctx,runtime.Error)
+                return
+            }
         }
         runtime.Stage="restarting"; runtime.ClientRunning=false; writeVKRuntime(c,runtime)
         // Return to the top: Auto API gets a new call/hash set; Auto JS gets a
