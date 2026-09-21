@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+    "errors"
+    "testing"
+)
 
 func TestAutoCallCountMatchesAndroidPolicy(t *testing.T) {
 	cases := map[int]int{18: 1, 27: 1, 54: 2, 81: 3, 108: 4, 126: 5}
@@ -30,7 +33,7 @@ func TestVKTokenInvalidCodesAreTyped(t *testing.T) {
         }
     }
     for _, code := range []int{6, 9, 15} {
-        err := &vkAPIError{Code: code, Msg: "other"}
+        err := errors.New("VK API other error")
         if isVKTokenInvalidError(err) {
             t.Fatalf("code=%d was incorrectly classified as invalid token", code)
         }
