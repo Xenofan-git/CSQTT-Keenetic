@@ -33,10 +33,10 @@ jobs:
           from pathlib import Path
           p = Path("wpewebkit-2.54.0/Source/WebCore/bindings/js/JSHTMLMediaElementCustom.cpp")
           s = p.read_text()
-          s = s.replace("#if ENABLE(VIDEO)", "#if 0 /* OAuth helper does not need media bindings; WPE 2.54.0 guard is inconsistent in this release */", 1)
-          if "#if 0 /* OAuth helper" not in s:
-              s = s.replace('#include "config.h"\\n', '#include "config.h"\\n\\n#if 0 /* OAuth helper does not need media bindings; WPE 2.54.0 guard is inconsistent in this release */\\n', 1)
-              s = s.rstrip() + "\\n\\n#endif\\n"
+          marker = '#include "config.h"\\n'
+          if "#if ENABLE(VIDEO)" not in s:
+              s = s.replace(marker, marker + "\\n#if ENABLE(VIDEO)\\n", 1)
+              s = s.rstrip() + "\\n\\n#endif /* ENABLE(VIDEO) */\\n"
           p.write_text(s)
           PY
 
