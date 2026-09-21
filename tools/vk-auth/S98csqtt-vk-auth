@@ -1,0 +1,11 @@
+#!/bin/sh
+ENABLED=yes
+PROCS=csqtt-vk-auth
+ARGS=""
+PREARGS=""
+DESC=csqtt-vk-auth
+PATH=/opt/sbin:/opt/bin:/usr/sbin:/usr/bin:/sbin:/bin
+if [ -f /opt/etc/csqtt/vk-auth.env ]; then
+  . /opt/etc/csqtt/vk-auth.env
+fi
+. /opt/etc/init.d/rc.func
