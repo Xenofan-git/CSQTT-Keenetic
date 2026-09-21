@@ -21,11 +21,10 @@ jobs:
       - name: Build static ARM64 binary
         uses: docker://golang:1.25-bookworm
         with:
-          args: >
-            bash -lc '
-            cd "$GITHUB_WORKSPACE/tools/vk-auth" &&
-            mkdir -p "$GITHUB_WORKSPACE/dist" &&
-            CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags="-s -w" -o "$GITHUB_WORKSPACE/dist/csqtt-vk-auth" .'
+          args: >-
+            go build -trimpath -ldflags="-s -w"
+            -o /github/workspace/dist/csqtt-vk-auth
+            /github/workspace/tools/vk-auth
 
       - name: Package Entware component
         shell: bash
