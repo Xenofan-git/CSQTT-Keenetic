@@ -36,8 +36,8 @@ jobs:
           install -m 0755 dist/csqtt-vk-auth package/opt/bin/csqtt-vk-auth
           install -m 0755 tools/vk-auth/S98csqtt-vk-auth package/opt/etc/init.d/S98csqtt-vk-auth
           cat > package/opt/etc/csqtt/vk-auth.env.example <<'EOF'
-          VK_AUTH_LISTEN=0.0.0.0:18080
-          VK_REDIRECT_URI=http://ROUTER_IP:18080/api/vk/callback
+          VK_AUTH_LISTEN=0.0.0.0:18081
+          VK_REDIRECT_URI=http://ROUTER_IP:18081/api/vk/callback
           VK_CLIENT_ID=7793118
           VK_OAUTH_SCOPE=1073737727
           VK_API_VERSION=5.199
