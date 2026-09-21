@@ -60,7 +60,7 @@ jobs:
             tar -tf "$data" | head -40 || true
             tar -xf "$data" -C extract
             echo "=== Target filesystem layout for $pkg ==="
-            find extract -maxdepth 4 \( -type f -o -type l \) | head -40
+            find extract -maxdepth 4 \( -type f -o -type l \) | head -40 || true
             # The Entware data archive is rooted at /opt.  Flatten that
             # prefix so the sysroot itself represents Entware's /opt tree.
             if [ -d extract/opt ]; then
