@@ -1,0 +1,53 @@
+name: Build VK Auth ARM64 Entware
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [vk-auth-entware]
+    paths:
+      - 'tools/vk-auth/**'
+      - '.github/workflows/build-vk-auth-entware.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build static ARM64 binary
+        uses: docker://golang:1.25-bookworm
+        with:
+          args: >
+            bash -lc '
+            cd "$GITHUB_WORKSPACE/tools/vk-auth" &&
+            mkdir -p "$GITHUB_WORKSPACE/dist" &&
+            CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags="-s -w" -o "$GITHUB_WORKSPACE/dist/csqtt-vk-auth" .'
+
+      - name: Package Entware component
+        shell: bash
+        run: |
+          set -euxo pipefail
+          rm -rf package dist-out
+          mkdir -p package/opt/bin package/opt/etc/csqtt package/opt/etc/init.d dist-out
+          install -m 0755 dist/csqtt-vk-auth package/opt/bin/csqtt-vk-auth
+          install -m 0755 tools/vk-auth/S98csqtt-vk-auth package/opt/etc/init.d/S98csqtt-vk-auth
+          cat > package/opt/etc/csqtt/vk-auth.env.example <<'EOF'
+          VK_AUTH_LISTEN=0.0.0.0:18080
+          VK_REDIRECT_URI=http://ROUTER_IP:18080/api/vk/callback
+          VK_CLIENT_ID=7793118
+          VK_OAUTH_SCOPE=1073737727
+          VK_API_VERSION=5.199
+          VK_TOKEN_FILE=/opt/etc/csqtt/vk-token.json
+          EOF
+          tar -C package -czf dist-out/csqtt-vk-auth-arm64-entware.tar.gz .
+          sha256sum dist-out/csqtt-vk-auth-arm64-entware.tar.gz > dist-out/SHA256SUMS
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: csqtt-vk-auth-arm64-entware
+          path: dist-out/*
+          if-no-files-found: error
