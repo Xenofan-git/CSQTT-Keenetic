@@ -20,7 +20,7 @@ jobs:
       - name: Install host build tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential gcc-aarch64-linux-gnu g++-aarch64-linux-gnu cmake ninja-build pkg-config python3 python3-pip perl ruby bison flex gperf gettext xz-utils binutils curl ca-certificates
+          sudo apt-get install -y build-essential gcc-aarch64-linux-gnu g++-aarch64-linux-gnu cmake ninja-build pkg-config python3 python3-pip meson python3-setuptools perl ruby bison flex gperf gettext xz-utils binutils curl ca-certificates
       - name: Prepare Entware target sysroot
         shell: bash
         run: |
@@ -54,7 +54,7 @@ jobs:
             cd "$GITHUB_WORKSPACE"
           }
           # Entware uses libpcre2 as the PCRE2 package name.
-          for p in libc libgcc libstdcpp glib2 icu libsoup3 libfreetype fontconfig libpng libjpeg-turbo zlib libxml2 libxslt libffi libpcre2 libsqlite3 libopenssl libcares libpsl libidn2 libunistring libbrotlidec libbrotlienc libbrotlicommon libatomic libbz2 libzstd libexpat harfbuzz libharfbuzz; do
+          for p in libc libgcc libstdcpp glib2 icu libsoup3 libfreetype fontconfig libpng libjpeg-turbo zlib libxml2 libxslt libffi libpcre2 libsqlite3 libopenssl libcares libpsl libidn2 libunistring libbrotlidec libbrotlienc libbrotlicommon libatomic libbz2 libzstd libexpat; do
             extract_pkg "$p"
           done
           mkdir -p "$SYSROOT/lib" "$SYSROOT/usr/lib"
@@ -80,6 +80,46 @@ jobs:
           echo "01ca34cd7af880c038d35aa94482fee785a77db37b614c584475d7d43b3a2dc0  $RUNNER_TEMP/wpe.tar.xz" | sha256sum -c -
           tar -xf "$RUNNER_TEMP/wpe.tar.xz"
           mv "wpewebkit-${WPE_VERSION}" wpewebkit
+      - name: Build minimal HarfBuzz for Entware
+        shell: bash
+        run: |
+          set -euxo pipefail
+          SYSROOT="$GITHUB_WORKSPACE/sysroot"
+          HB_VERSION=11.2.1
+          curl -fsSL "https://github.com/harfbuzz/harfbuzz/releases/download/\${HB_VERSION}/harfbuzz-\${HB_VERSION}.tar.xz" -o "$RUNNER_TEMP/harfbuzz.tar.xz"
+          tar -xf "$RUNNER_TEMP/harfbuzz.tar.xz" -C "$RUNNER_TEMP"
+          cat > "$RUNNER_TEMP/harfbuzz-cross.txt" <<EOF
+          [binaries]
+          c = 'aarch64-linux-gnu-gcc'
+          cpp = 'aarch64-linux-gnu-g++'
+          ar = 'aarch64-linux-gnu-ar'
+          strip = 'aarch64-linux-gnu-strip'
+          pkg-config = 'pkg-config'
+          [host_machine]
+          system = 'linux'
+          cpu_family = 'aarch64'
+          cpu = 'aarch64'
+          endian = 'little'
+          [properties]
+          sys_root = '$SYSROOT'
+          [built-in options]
+          c_args = ['--sysroot=$SYSROOT']
+          cpp_args = ['--sysroot=$SYSROOT']
+          c_link_args = ['--sysroot=$SYSROOT']
+          cpp_link_args = ['--sysroot=$SYSROOT']
+          EOF
+          export PKG_CONFIG_SYSROOT_DIR="$SYSROOT"
+          export PKG_CONFIG_LIBDIR="$SYSROOT/lib/pkgconfig:$SYSROOT/share/pkgconfig:$SYSROOT/usr/lib/pkgconfig:$SYSROOT/usr/share/pkgconfig"
+          cd "$RUNNER_TEMP/harfbuzz-${HB_VERSION}"
+          meson setup build-hb --cross-file "$RUNNER_TEMP/harfbuzz-cross.txt" --prefix=/opt/hb --libdir=lib --buildtype=minsize \
+            -Dglib=disabled -Dfreetype=disabled -Dicu=disabled -Dgraphite2=disabled \
+            -Dcairo=disabled -Dtests=disabled -Ddocs=disabled -Dutilities=disabled -Dbenchmark=disabled
+          meson compile -C build-hb
+          DESTDIR="$RUNNER_TEMP/hb-install" meson install -C build-hb
+          cp -a "$RUNNER_TEMP/hb-install/opt/hb/." "$SYSROOT/"
+          echo "=== Built HarfBuzz ==="
+          find "$SYSROOT" -type f \( -name hb.h -o -name hb-version.h -o -name harfbuzz.pc -o -name 'libharfbuzz.so*' \) -print
+          grep -E '^Version:' "$SYSROOT/lib/pkgconfig/harfbuzz.pc" || true
       - name: Configure ARM64 WPE
         shell: bash
         run: |
