@@ -42,25 +42,29 @@ jobs:
             file "$RUNNER_TEMP/ipk/$pkg.ipk"
             mkdir -p "$RUNNER_TEMP/ipk/$pkg"
             cd "$RUNNER_TEMP/ipk/$pkg"
-            rm -rf extract
-            mkdir -p extract
+            rm -rf extract outer
+            mkdir -p extract outer
+            # Entware's CDN currently serves the .ipk as a gzip-compressed
+            # Debian package container (not as a normal ar archive).  The
+            # actual target filesystem is inside data.tar.*.
             if ar t "../$pkg.ipk" >/dev/null 2>&1; then
               ar x "../$pkg.ipk"
               data="$(find . -maxdepth 1 -name 'data.tar.*' -print -quit)"
-              test -n "$data"
-              tar -xf "$data" -C extract
             else
-              echo "Entware endpoint returned a gzip-compressed data archive; extracting directly"
-              tar -xzf "../$pkg.ipk" -C extract
+              echo "Entware endpoint returned gzip-compressed .ipk container"
+              tar -xzf "../$pkg.ipk" -C outer
+              data="$(find outer -maxdepth 1 -name 'data.tar.*' -print -quit)"
             fi
-            echo "=== Payload layout for $pkg ==="
-            find extract -maxdepth 3 -type f -o -type l | head -40
-            # Entware payloads are normally rooted at ./opt/...; flatten that
-            # prefix so the sysroot itself becomes the Entware /opt tree.
+            test -n "$data"
+            echo "=== Debian package payload for $pkg ==="
+            tar -tf "$data" | head -40
+            tar -xf "$data" -C extract
+            echo "=== Target filesystem layout for $pkg ==="
+            find extract -maxdepth 4 \( -type f -o -type l \) | head -40
+            # The Entware data archive is rooted at /opt.  Flatten that
+            # prefix so the sysroot itself represents Entware's /opt tree.
             if [ -d extract/opt ]; then
               cp -a extract/opt/. "$SYSROOT/"
-            elif [ -d extract/./opt ]; then
-              cp -a extract/./opt/. "$SYSROOT/"
             else
               cp -a extract/. "$SYSROOT/"
             fi
