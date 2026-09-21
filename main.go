@@ -646,7 +646,30 @@ func main() {
             c.VKHashMode = "manual"
         }
 
-        cmd := exec.CommandContext(ctx, c.Client, buildClientArgs(c)...)
+        clientConfig := c
+        if managerVKHashMode == "manual" && len(unavailableManual) > 0 {
+            clientConfig.VKHashes = make([]string, 0, len(c.VKHashes))
+            for _, h := range c.VKHashes {
+                if !unavailableManual[h] {
+                    clientConfig.VKHashes = append(clientConfig.VKHashes, h)
+                }
+            }
+            if len(clientConfig.VKHashes) == 0 {
+                runtime.Stage = "error"
+                runtime.Error = "all configured VK hashes are unavailable"
+                runtime.HashTotal = len(c.VKHashes)
+                runtime.HashActive = 0
+                runtime.HashUnavailable = len(unavailableManual)
+                runtime.HashNotice = "Все ручные VK хеши недоступны. Туннель остановлен — добавьте новые хеши."
+                runtime.HashNoticeAt = time.Now().UTC().Format(time.RFC3339)
+                runtime.Hashes = buildHashRuntime(c, unavailableManual, 0, "", "")
+                writeVKRuntime(c, runtime)
+                _ = ip("link", "set", "dev", tunName, "down")
+                waitForManagerShutdown(ctx, runtime.Error)
+                return
+            }
+        }
+        cmd := exec.CommandContext(ctx, clientConfig.Client, buildClientArgs(clientConfig)...)
         cmd.Env = append(os.Environ(), "CSQTT_EVENTS=1")
         cmd.Stderr = os.Stderr
         clientStdin, err := cmd.StdinPipe()
