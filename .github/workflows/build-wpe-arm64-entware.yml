@@ -1,0 +1,64 @@
+name: Build WPE WebKit ARM64 Entware
+
+on:
+  push:
+    branches: [vk-auth-entware]
+    paths:
+      - "tools/wpe-vk-auth/**"
+      - ".github/workflows/build-wpe-arm64-entware.yml"
+  workflow_dispatch:
+
+jobs:
+  build-wpe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y             build-essential cmake ninja-build pkg-config             python3 python3-pip git curl xz-utils             libglib2.0-dev libicu-dev libxml2-dev libxslt1-dev             libsqlite3-dev libjpeg-dev libpng-dev             libharfbuzz-dev libhyphen-dev libmanette-dev             libseccomp-dev libsystemd-dev libwoff-dev             libwayland-dev wayland-protocols             libdrm-dev libgbm-dev mesa-common-dev             libepoxy-dev libegl1-mesa-dev libgles2-mesa-dev             libavif-dev libwebp-dev
+
+      - name: Download WPE WebKit 2.54.0
+        run: |
+          curl -fL --retry 5             https://wpewebkit.org/releases/wpewebkit-2.54.0.tar.xz             -o wpewebkit-2.54.0.tar.xz
+          echo "efa9bcc3cb891c2d88f50eec710d9ccee71cbdf1040420361eb98c17355eb452  wpewebkit-2.54.0.tar.xz" | sha256sum -c -
+          tar -xf wpewebkit-2.54.0.tar.xz
+
+      - name: Configure native WPE headless build
+        run: |
+          cmake -S wpewebkit-2.54.0 -B build-wpe -G Ninja             -DPORT=WPE             -DCMAKE_BUILD_TYPE=Release             -DENABLE_WPE_LEGACY_API=OFF             -DENABLE_WEBDRIVER=OFF             -DENABLE_GAMEPAD=OFF             -DENABLE_SPELLCHECKING=OFF             -DUSE_GSTREAMER=OFF             -DUSE_GSTREAMER_WEBRTC=OFF             -DUSE_OPENGL=OFF             -DUSE_LIBHYPHEN=OFF             -DENABLE_WEBXR=OFF             -DENABLE_WEB_RTC=OFF             -DENABLE_PDFJS=OFF
+
+      - name: Build WPE WebKit
+        run: |
+          cmake --build build-wpe --parallel 2
+
+      - name: Show WPE build result
+        run: |
+          cmake --build build-wpe --target help | head -80 || true
+          find build-wpe -maxdepth 4 -type f \( -name 'libWPEWebKit*.so*' -o -name 'WebKitWebProcess' -o -name 'WPEWebProcess' \) -print | head -50
+
+      - name: Build wpe-vk-auth probe
+        run: |
+          cmake -S tools/wpe-vk-auth -B build-probe -G Ninja             -DCMAKE_BUILD_TYPE=Release             -DCMAKE_PREFIX_PATH="$PWD/build-wpe"             -DPKG_CONFIG_PATH="$PWD/build-wpe/lib/pkgconfig:$PKG_CONFIG_PATH"
+          cmake --build build-probe --parallel 2
+
+      - name: Package probe
+        run: |
+          mkdir -p dist/wpe-vk-auth
+          cp build-probe/wpe-vk-auth dist/wpe-vk-auth/
+          cp tools/wpe-vk-auth/README.md dist/wpe-vk-auth/
+          tar -C dist -czf wpe-vk-auth-native.tar.gz wpe-vk-auth
+          sha256sum dist/wpe-vk-auth.tar.gz 2>/dev/null || sha256sum wpe-vk-auth-native.tar.gz
+        continue-on-error: true
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: wpe-vk-auth-native
+          path: |
+            build-probe/wpe-vk-auth
+            wpe-vk-auth-native.tar.gz
+          if-no-files-found: warn
