@@ -223,7 +223,65 @@ jobs:
           SYSROOT="$GITHUB_WORKSPACE/sysroot"
           sudo apt-get install -y libjpeg-dev
           mkdir -p "$SYSROOT/include"
-          cp -a /usr/include/jpeglib.h /usr/include/jmorecfg.h /usr/include/jerror.h /usr/include/jconfig.h "$SYSROOT/include/"
+          cp -a /usr/include/jpeglib.h /usr/include/jmorecfg.h /usr/include/jerror.h "$SYSROOT/include/"
+          JCONFIG="$(dpkg -L libjpeg-dev | grep '/jconfig.h
+          echo "=== JPEG headers ==="
+          ls -l "$SYSROOT/include/"jpeglib.h "$SYSROOT/include/"jmorecfg.h "$SYSROOT/include/"jerror.h "$SYSROOT/include/"jconfig.h
+      - name: Configure ARM64 WPE
+        shell: bash
+        run: |
+          set -euxo pipefail
+          SYSROOT="$GITHUB_WORKSPACE/sysroot"
+          cat > "$RUNNER_TEMP/aarch64-entware.cmake" <<EOF
+          set(CMAKE_SYSTEM_NAME Linux)
+          set(CMAKE_SYSTEM_PROCESSOR aarch64)
+          set(CMAKE_SYSROOT "$SYSROOT")
+          set(CMAKE_C_COMPILER aarch64-linux-gnu-gcc)
+          set(CMAKE_CXX_COMPILER aarch64-linux-gnu-g++)
+          set(CMAKE_FIND_ROOT_PATH "$SYSROOT")
+          set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
+          set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
+          set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
+          set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE ONLY)
+          EOF
+          export PKG_CONFIG_SYSROOT_DIR="$SYSROOT"
+          export PKG_CONFIG_LIBDIR="$SYSROOT/lib/pkgconfig:$SYSROOT/share/pkgconfig:$SYSROOT/usr/lib/pkgconfig:$SYSROOT/usr/share/pkgconfig"
+          export PKG_CONFIG_PATH=""
+          cmake -S wpewebkit -B build-wpe -GNinja -DCMAKE_BUILD_TYPE=MinSizeRel -DCMAKE_TOOLCHAIN_FILE="$RUNNER_TEMP/aarch64-entware.cmake" -DGLib_LIBRARY="$SYSROOT/lib/libglib-2.0.so" -DGLib_INCLUDE_DIR="$SYSROOT/include/glib-2.0" -DGLib_Config_INCLUDE_DIR="$SYSROOT/lib/glib-2.0/include" -DGLib_Object_LIBRARY="$SYSROOT/lib/libgobject-2.0.so" -DGLib_Thread_LIBRARY="$SYSROOT/lib/libgthread-2.0.so" -DGLib_Module_LIBRARY="$SYSROOT/lib/libgmodule-2.0.so" -DGLib_Gio_LIBRARY="$SYSROOT/lib/libgio-2.0.so" -DGLib_GioUnix_LIBRARY="$SYSROOT/lib/libgio-2.0.so" -DCMAKE_INSTALL_PREFIX=/opt -DPORT=WPE -DENABLE_WPE_PLATFORM=ON -DENABLE_WPE_PLATFORM_HEADLESS=ON -DENABLE_WPE_PLATFORM_WAYLAND=OFF -DENABLE_WPE_PLATFORM_DRM=OFF -DENABLE_WPE_LEGACY_API=OFF -DENABLE_COG=OFF -DENABLE_INTROSPECTION=OFF -DENABLE_DOCUMENTATION=OFF -DENABLE_MINIBROWSER=OFF -DENABLE_WEBDRIVER=OFF -DENABLE_WEBRTC=OFF -DENABLE_WEBXR=OFF -DENABLE_GAMEPAD=OFF -DENABLE_SPELLCHECK=OFF -DENABLE_PDFJS=OFF -DENABLE_XSLT=OFF -DENABLE_VIDEO=OFF -DENABLE_MEDIA_STREAM=OFF -DENABLE_WEB_AUDIO=OFF -DENABLE_MEDIA_SOURCE=OFF -DENABLE_MEDIA_RECORDER=OFF -DENABLE_BUBBLEWRAP_SANDBOX=OFF -DENABLE_JOURNALD_LOG=OFF -DUSE_GSTREAMER=OFF -DUSE_GSTREAMER_GL=OFF -DUSE_GSTREAMER_WEBRTC=OFF -DUSE_SKIA=ON -DUSE_WOFF2=OFF -DUSE_LIBHYPHEN=OFF -DUSE_OPENXR=OFF -DUSE_GBM=OFF -DUSE_SYSTEM_SYSPROF_CAPTURE=OFF -DUSE_SYSTEM_UNIFDEF=OFF -DENABLE_EXPERIMENTAL_FEATURES=OFF
+      - name: Build WPE
+        run: cmake --build build-wpe --parallel 2
+      - name: Build VK OAuth launcher
+        shell: bash
+        run: |
+          set -euxo pipefail
+          SYSROOT="$GITHUB_WORKSPACE/sysroot"
+          export PKG_CONFIG_SYSROOT_DIR="$SYSROOT"
+          export PKG_CONFIG_LIBDIR="$SYSROOT/lib/pkgconfig:$SYSROOT/share/pkgconfig"
+          aarch64-linux-gnu-g++ --sysroot="$SYSROOT" -Os -ffunction-sections -fdata-sections -Wl,--gc-sections tools/vk-oauth/main.cpp -o build-wpe/vk-oauth $(pkg-config --cflags --libs wpe-webkit-2.0 glib-2.0 gio-2.0)
+      - name: Package prototype
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p bundle/bin bundle/lib
+          cp build-wpe/vk-oauth bundle/bin/
+          find build-wpe -type f \( -name 'libWPEWebKit*.so*' -o -name 'WPEWebProcess' -o -name 'WPENetworkProcess' \) -exec cp -a {} bundle/lib/ \;
+          cat > bundle/vk-oauth <<'EOF'
+          #!/bin/sh
+          BASE="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+          export LD_LIBRARY_PATH="$BASE/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+          export WPE_PLATFORM=headless
+          exec "$BASE/bin/vk-oauth" "$@"
+          EOF
+          chmod +x bundle/vk-oauth
+          tar -C bundle -czf wpe-vk-oauth-arm64-entware.tar.gz .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wpe-vk-oauth-arm64-entware
+          path: wpe-vk-oauth-arm64-entware.tar.gz
+          if-no-files-found: error
+ | head -1)"
+          test -n "$JCONFIG"
+          cp -a "$JCONFIG" "$SYSROOT/include/jconfig.h"
           echo "=== JPEG headers ==="
           ls -l "$SYSROOT/include/"jpeglib.h "$SYSROOT/include/"jmorecfg.h "$SYSROOT/include/"jerror.h "$SYSROOT/include/"jconfig.h
       - name: Configure ARM64 WPE
