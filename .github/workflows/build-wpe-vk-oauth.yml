@@ -216,42 +216,16 @@ jobs:
           echo "=== Built HarfBuzz ==="
           find "$SYSROOT" -type f \( -name hb.h -o -name hb-version.h -o -name harfbuzz.pc -o -name 'libharfbuzz.so*' \) -print
           grep -E '^Version:' "$SYSROOT/lib/pkgconfig/harfbuzz.pc" || true
-      - name: Build minimal libjpeg-turbo for Entware
+      - name: Prepare libjpeg development headers
         shell: bash
         run: |
           set -euxo pipefail
           SYSROOT="$GITHUB_WORKSPACE/sysroot"
-          JPEG_VERSION=3.2.0
-          curl -fsSL "https://github.com/libjpeg-turbo/libjpeg-turbo/releases/download/${JPEG_VERSION}/libjpeg-turbo-${JPEG_VERSION}.tar.gz" -o "$RUNNER_TEMP/libjpeg-turbo.tar.gz"
-          tar -xzf "$RUNNER_TEMP/libjpeg-turbo.tar.gz" -C "$RUNNER_TEMP"
-          cat > "$RUNNER_TEMP/jpeg-toolchain.cmake" <<EOF
-          set(CMAKE_SYSTEM_NAME Linux)
-          set(CMAKE_SYSTEM_PROCESSOR aarch64)
-          set(CMAKE_SYSROOT "$SYSROOT")
-          set(CMAKE_C_COMPILER aarch64-linux-gnu-gcc)
-          set(CMAKE_CXX_COMPILER aarch64-linux-gnu-g++)
-          set(CMAKE_FIND_ROOT_PATH "$SYSROOT")
-          set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
-          set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
-          set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
-          set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE ONLY)
-          EOF
-          cmake -S "$RUNNER_TEMP/libjpeg-turbo-${JPEG_VERSION}" -B "$RUNNER_TEMP/jpeg-build" -GNinja \
-            -DCMAKE_BUILD_TYPE=MinSizeRel \
-            -DCMAKE_TOOLCHAIN_FILE="$RUNNER_TEMP/jpeg-toolchain.cmake" \
-            -DCMAKE_INSTALL_PREFIX=/opt \
-            -DWITH_TURBOJPEG=OFF \
-            -DWITH_SIMD=ON \
-            -DENABLE_SHARED=ON \
-            -DENABLE_STATIC=OFF \
-            -DREQUIRE_SIMD=OFF
-          cmake --build "$RUNNER_TEMP/jpeg-build" --parallel 2
-          DESTDIR="$RUNNER_TEMP/jpeg-install" cmake --install "$RUNNER_TEMP/jpeg-build"
-          cp -a "$RUNNER_TEMP/jpeg-install/opt/." "$SYSROOT/"
-          echo "=== Built JPEG ==="
-          find "$SYSROOT" -type f \( -name 'jpeglib.h' -o -name 'libjpeg.so*' \) -print
-          test -f "$SYSROOT/include/jpeglib.h"
-          test -f "$SYSROOT/lib/libjpeg.so"
+          sudo apt-get install -y libjpeg-dev
+          mkdir -p "$SYSROOT/include"
+          cp -a /usr/include/jpeglib.h /usr/include/jmorecfg.h /usr/include/jerror.h /usr/include/jconfig.h "$SYSROOT/include/"
+          echo "=== JPEG headers ==="
+          ls -l "$SYSROOT/include/"jpeglib.h "$SYSROOT/include/"jmorecfg.h "$SYSROOT/include/"jerror.h "$SYSROOT/include/"jconfig.h
       - name: Configure ARM64 WPE
         shell: bash
         run: |
