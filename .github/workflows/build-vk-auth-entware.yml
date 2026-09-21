@@ -22,9 +22,9 @@ jobs:
         uses: docker://golang:1.25-bookworm
         with:
           args: >-
-            go build -trimpath -ldflags="-s -w"
-            -o /github/workspace/dist/csqtt-vk-auth
-            /github/workspace/tools/vk-auth
+            go -C /github/workspace/tools/vk-auth build
+            -trimpath -ldflags="-s -w"
+            -o /github/workspace/dist/csqtt-vk-auth .
 
       - name: Package Entware component
         shell: bash
