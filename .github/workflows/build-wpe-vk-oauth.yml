@@ -90,6 +90,57 @@ jobs:
           echo "=== HarfBuzz libraries ==="
           find "$SYSROOT" -type f -name "libharfbuzz.so*" -print || true
           du -sh "$SYSROOT"
+      - name: Prepare ICU development headers and pkg-config metadata
+        shell: bash
+        run: |
+          set -euxo pipefail
+          SYSROOT="$GITHUB_WORKSPACE/sysroot"
+          ICU_VERSION=78.2
+          curl -fsSL "https://github.com/unicode-org/icu/releases/download/release-78-2/icu4c-78_2-src.tgz" -o "$RUNNER_TEMP/icu-src.tgz"
+          mkdir -p "$RUNNER_TEMP/icu-src"
+          tar -xzf "$RUNNER_TEMP/icu-src.tgz" -C "$RUNNER_TEMP/icu-src"
+          mkdir -p "$SYSROOT/include" "$SYSROOT/lib/pkgconfig"
+          cp -a "$RUNNER_TEMP/icu-src/icu/source/common/unicode" "$SYSROOT/include/"
+          cat > "$SYSROOT/lib/pkgconfig/icu-uc.pc" <<EOF
+          prefix=/opt
+          exec_prefix=\${prefix}
+          libdir=\${exec_prefix}/lib
+          includedir=\${prefix}/include
+          Name: icu-uc
+          Description: ICU Unicode library
+          Version: $ICU_VERSION
+          Libs: -L\${libdir} -licuuc
+          Cflags: -I\${includedir}
+          EOF
+          cat > "$SYSROOT/lib/pkgconfig/icu-i18n.pc" <<EOF
+          prefix=/opt
+          exec_prefix=\${prefix}
+          libdir=\${exec_prefix}/lib
+          includedir=\${prefix}/include
+          Name: icu-i18n
+          Description: ICU internationalization library
+          Version: $ICU_VERSION
+          Requires: icu-uc
+          Libs: -L\${libdir} -licui18n
+          Cflags: -I\${includedir}
+          EOF
+          cat > "$SYSROOT/lib/pkgconfig/icu-io.pc" <<EOF
+          prefix=/opt
+          exec_prefix=\${prefix}
+          libdir=\${exec_prefix}/lib
+          includedir=\${prefix}/include
+          Name: icu-io
+          Description: ICU I/O library
+          Version: $ICU_VERSION
+          Requires: icu-uc
+          Libs: -L\${libdir} -licuio
+          Cflags: -I\${includedir}
+          EOF
+          echo "=== ICU development files ==="
+          test -f "$SYSROOT/include/unicode/utypes.h"
+          ls -l "$SYSROOT/lib/libicuuc.so"* "$SYSROOT/lib/libicui18n.so"* "$SYSROOT/lib/libicudata.so"* 2>/dev/null || true
+          cat "$SYSROOT/lib/pkgconfig/icu-uc.pc"
+
       - name: Fetch WPE WebKit
         run: |
           set -euxo pipefail
