@@ -19,7 +19,7 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y             build-essential cmake ninja-build pkg-config             python3 python3-pip git curl xz-utils gperf             libglib2.0-dev libicu-dev libgcrypt20-dev libsoup-3.0-dev libtasn1-6-dev libxkbcommon-dev libinput-dev liblcms2-dev libxml2-dev libxslt1-dev             libsqlite3-dev libjpeg-dev libpng-dev             libharfbuzz-dev libhyphen-dev             libseccomp-dev libsystemd-dev libwoff-dev             libwayland-dev wayland-protocols             libdrm-dev libgbm-dev mesa-common-dev             libepoxy-dev libegl1-mesa-dev libgles2-mesa-dev             libavif-dev libwebp-dev
+          sudo apt-get install -y             build-essential cmake ninja-build pkg-config             python3 python3-pip git curl xz-utils gperf unifdef             libglib2.0-dev libicu-dev libgcrypt20-dev libsoup-3.0-dev libtasn1-6-dev libxkbcommon-dev libinput-dev liblcms2-dev libxml2-dev libxslt1-dev             libsqlite3-dev libjpeg-dev libpng-dev             libharfbuzz-dev libhyphen-dev             libseccomp-dev libsystemd-dev libwoff-dev             libwayland-dev wayland-protocols             libdrm-dev libgbm-dev mesa-common-dev             libepoxy-dev libegl1-mesa-dev libgles2-mesa-dev             libavif-dev libwebp-dev
 
       - name: Download WPE WebKit 2.54.0
         run: |
