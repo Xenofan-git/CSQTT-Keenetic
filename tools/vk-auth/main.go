@@ -18,7 +18,7 @@ import (
 )
 
 const (
-  defaultAddr = "0.0.0.0:18080"
+  defaultAddr = "0.0.0.0:18081"
   defaultClientID = "7793118"
   defaultScope = "1073737727"
   defaultAPIVer = "5.199"
@@ -121,17 +121,25 @@ func (a *App) start(w http.ResponseWriter, r *http.Request) {
 
 func (a *App) callback(w http.ResponseWriter, r *http.Request) {
   w.Header().Set("Content-Type", "text/html; charset=utf-8")
-  html := "<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1">" +
-    "<title>CSQTT VK authorization</title><body><p id="s">Получение результата VK...</p><script>" +
-    "(async()=>{const s=document.getElementById('s');" +
-    "const p=new URLSearchParams(location.hash.replace(/^#/,''));" +
-    "const token=p.get('access_token'),state=p.get('state'),uid=p.get('user_id'),exp=p.get('expires_in');" +
-    "if(!token){s.textContent='VK не вернул access_token. Авторизация не завершена.';return}" +
-    "try{const body=new URLSearchParams({access_token:token,state:state||'',user_id:uid||'',expires_in:exp||''});" +
-    "const r=await fetch('/api/vk/token',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body});" +
-    "const j=await r.json();if(!r.ok)throw new Error(j.error||'token rejected');" +
-    "s.textContent='VK авторизация завершена. Возвращаемся в панель...';location.replace('/api/vk/status')" +
-    "}catch(e){s.textContent='Ошибка: '+e.message}})();</script></body>"
+  const html = `<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CSQTT VK authorization</title>
+<body><p id="s">Получение результата VK...</p>
+<script>
+(async()=>{
+ const s=document.getElementById('s');
+ const p=new URLSearchParams(location.hash.replace(/^#/,''));
+ const token=p.get('access_token'),state=p.get('state'),uid=p.get('user_id'),exp=p.get('expires_in');
+ if(!token){s.textContent='VK не вернул access_token. Авторизация не завершена.';return}
+ try{
+   const body=new URLSearchParams({access_token:token,state:state||'',user_id:uid||'',expires_in:exp||''});
+   const r=await fetch('/api/vk/token',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body});
+   const j=await r.json();
+   if(!r.ok) throw new Error(j.error||'token rejected');
+   s.textContent='VK авторизация завершена. Возвращаемся в панель...';
+   location.replace('/api/vk/status');
+ }catch(e){s.textContent='Ошибка: '+e.message}
+})();
+</script></body>`
   io.WriteString(w, html)
 }
 
