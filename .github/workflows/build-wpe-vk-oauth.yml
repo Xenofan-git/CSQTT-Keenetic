@@ -100,7 +100,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/icu-src"
           tar -xzf "$RUNNER_TEMP/icu-src.tgz" -C "$RUNNER_TEMP/icu-src"
           mkdir -p "$SYSROOT/include" "$SYSROOT/lib/pkgconfig"
-          cp -a "$RUNNER_TEMP/icu-src/icu/source/common/unicode" "$SYSROOT/include/"
+          for lib in icuuc icui18n icuio icudata; do\n            so="$(find "$SYSROOT/lib" -maxdepth 1 -name "lib${lib}.so.*" -print -quit)"\n            if [ -n "$so" ] && [ ! -e "$SYSROOT/lib/lib${lib}.so" ]; then ln -sf "$(basename "$so")" "$SYSROOT/lib/lib${lib}.so"; fi\n          done\n          cp -a "$RUNNER_TEMP/icu-src/icu/source/common/unicode" "$SYSROOT/include/"
           cat > "$SYSROOT/lib/pkgconfig/icu-uc.pc" <<EOF
           prefix=/opt
           exec_prefix=\${prefix}
