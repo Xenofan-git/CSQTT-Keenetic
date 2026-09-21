@@ -29,7 +29,7 @@ jobs:
 
       - name: Configure native WPE headless build
         run: |
-          cmake -S wpewebkit-2.54.0 -B build-wpe -G Ninja             -DPORT=WPE             -DCMAKE_BUILD_TYPE=Release             -DENABLE_WPE_LEGACY_API=OFF             -DENABLE_INTROSPECTION=OFF             -DENABLE_WEBDRIVER=OFF             -DENABLE_GAMEPAD=OFF             -DENABLE_SPELLCHECKING=OFF             -DUSE_GSTREAMER=OFF             -DUSE_GSTREAMER_WEBRTC=OFF             -DUSE_OPENGL=OFF             -DUSE_LIBHYPHEN=OFF             -DENABLE_WEBXR=OFF             -DENABLE_WEB_RTC=OFF             -DENABLE_PDFJS=OFF
+          cmake -S wpewebkit-2.54.0 -B build-wpe -G Ninja             -DPORT=WPE             -DCMAKE_BUILD_TYPE=Release             -DENABLE_WPE_LEGACY_API=OFF             -DENABLE_INTROSPECTION=OFF             -DENABLE_WEBDRIVER=OFF             -DENABLE_GAMEPAD=OFF             -DENABLE_SPELLCHECKING=OFF             -DUSE_GSTREAMER=OFF             -DUSE_GSTREAMER_WEBRTC=OFF             -DUSE_OPENGL=OFF             -DUSE_LIBHYPHEN=OFF             -DUSE_ATK=OFF             -DENABLE_WEBXR=OFF             -DENABLE_WEB_RTC=OFF             -DENABLE_PDFJS=OFF
 
       - name: Build WPE WebKit
         run: |
