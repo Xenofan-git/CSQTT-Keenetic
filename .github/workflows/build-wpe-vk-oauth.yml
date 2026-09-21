@@ -110,6 +110,11 @@ jobs:
           ICU_UNICODE="$(find "$ICU_SRC" -type d -path "*/source/common/unicode" -print -quit)"
           test -n "$ICU_UNICODE"
           cp -a "$ICU_UNICODE" "$SYSROOT/include/"
+          # HarfBuzz is configured with /opt/hb and its cross sysroot resolves
+          # the ICU include prefix as /opt/include; keep a matching Entware
+          # layout in addition to the generic sysroot include path.
+          mkdir -p "$SYSROOT/opt/include"
+          cp -a "$ICU_UNICODE" "$SYSROOT/opt/include/"
           cat > "$SYSROOT/lib/pkgconfig/icu-uc.pc" <<EOF
           prefix=/opt
           exec_prefix=\${prefix}
