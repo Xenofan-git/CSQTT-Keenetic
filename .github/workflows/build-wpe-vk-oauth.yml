@@ -86,7 +86,7 @@ jobs:
           set -euxo pipefail
           SYSROOT="$GITHUB_WORKSPACE/sysroot"
           HB_VERSION=11.2.1
-          curl -fsSL "https://github.com/harfbuzz/harfbuzz/releases/download/\${HB_VERSION}/harfbuzz-\${HB_VERSION}.tar.xz" -o "$RUNNER_TEMP/harfbuzz.tar.xz"
+          curl -fsSL "https://github.com/harfbuzz/harfbuzz/releases/download/${HB_VERSION}/harfbuzz-${HB_VERSION}.tar.xz" -o "$RUNNER_TEMP/harfbuzz.tar.xz"
           tar -xf "$RUNNER_TEMP/harfbuzz.tar.xz" -C "$RUNNER_TEMP"
           cat > "$RUNNER_TEMP/harfbuzz-cross.txt" <<EOF
           [binaries]
