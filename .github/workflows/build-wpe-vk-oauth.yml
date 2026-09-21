@@ -96,11 +96,20 @@ jobs:
           set -euxo pipefail
           SYSROOT="$GITHUB_WORKSPACE/sysroot"
           ICU_VERSION=78.2
-          curl -fsSL "https://github.com/unicode-org/icu/releases/download/release-78-2/icu4c-78.2-sources.tgz" -o "$RUNNER_TEMP/icu-src.tgz"
+          curl -fsSL "https://github.com/unicode-org/icu/releases/download/release-78.2/icu4c-78.2-sources.tgz" -o "$RUNNER_TEMP/icu-src.tgz"
           mkdir -p "$RUNNER_TEMP/icu-src"
           tar -xzf "$RUNNER_TEMP/icu-src.tgz" -C "$RUNNER_TEMP/icu-src"
           mkdir -p "$SYSROOT/include" "$SYSROOT/lib/pkgconfig"
-          for lib in icuuc icui18n icuio icudata; do\n            so="$(find "$SYSROOT/lib" -maxdepth 1 -name "lib${lib}.so.*" -print -quit)"\n            if [ -n "$so" ] && [ ! -e "$SYSROOT/lib/lib${lib}.so" ]; then ln -sf "$(basename "$so")" "$SYSROOT/lib/lib${lib}.so"; fi\n          done\n          cp -a "$RUNNER_TEMP/icu-src/icu/source/common/unicode" "$SYSROOT/include/"
+          for lib in icuuc icui18n icuio icudata; do
+            so="$(find "$SYSROOT/lib" -maxdepth 1 -name "lib${lib}.so.*" -print -quit)"
+            if [ -n "$so" ] && [ ! -e "$SYSROOT/lib/lib${lib}.so" ]; then
+              ln -sf "$(basename "$so")" "$SYSROOT/lib/lib${lib}.so"
+            fi
+          done
+          ICU_SRC="$RUNNER_TEMP/icu-src"
+          ICU_UNICODE="$(find "$ICU_SRC" -type d -path "*/source/common/unicode" -print -quit)"
+          test -n "$ICU_UNICODE"
+          cp -a "$ICU_UNICODE" "$SYSROOT/include/"
           cat > "$SYSROOT/lib/pkgconfig/icu-uc.pc" <<EOF
           prefix=/opt
           exec_prefix=\${prefix}
@@ -109,7 +118,7 @@ jobs:
           Name: icu-uc
           Description: ICU Unicode library
           Version: $ICU_VERSION
-          Libs: -L\${libdir} -licuuc
+          Libs: -L\${libdir} -licuuc -licudata
           Cflags: -I\${includedir}
           EOF
           cat > "$SYSROOT/lib/pkgconfig/icu-i18n.pc" <<EOF
@@ -136,11 +145,25 @@ jobs:
           Libs: -L\${libdir} -licuio
           Cflags: -I\${includedir}
           EOF
+          cat > "$SYSROOT/lib/pkgconfig/icu.pc" <<EOF
+          prefix=/opt
+          exec_prefix=\${prefix}
+          libdir=\${exec_prefix}/lib
+          includedir=\${prefix}/include
+          Name: icu
+          Description: ICU internationalization and Unicode libraries
+          Version: $ICU_VERSION
+          Requires: icu-i18n icu-uc
+          Libs: -L\${libdir} -licui18n -licuuc -licudata
+          Cflags: -I\${includedir}
+          EOF
           echo "=== ICU development files ==="
           test -f "$SYSROOT/include/unicode/utypes.h"
+          test -f "$SYSROOT/lib/pkgconfig/icu-uc.pc"
+          test -f "$SYSROOT/lib/pkgconfig/icu.pc"
           ls -l "$SYSROOT/lib/libicuuc.so"* "$SYSROOT/lib/libicui18n.so"* "$SYSROOT/lib/libicudata.so"* 2>/dev/null || true
-          cat "$SYSROOT/lib/pkgconfig/icu-uc.pc"
-
+          PKG_CONFIG_SYSROOT_DIR="$SYSROOT" PKG_CONFIG_LIBDIR="$SYSROOT/lib/pkgconfig:$SYSROOT/share/pkgconfig:$SYSROOT/usr/lib/pkgconfig:$SYSROOT/usr/share/pkgconfig" pkg-config --modversion icu-uc
+          PKG_CONFIG_SYSROOT_DIR="$SYSROOT" PKG_CONFIG_LIBDIR="$SYSROOT/lib/pkgconfig:$SYSROOT/share/pkgconfig:$SYSROOT/usr/lib/pkgconfig:$SYSROOT/usr/share/pkgconfig" pkg-config --modversion icu
       - name: Fetch WPE WebKit
         run: |
           set -euxo pipefail
