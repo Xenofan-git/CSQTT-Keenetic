@@ -53,10 +53,14 @@ jobs:
               echo "Entware endpoint returned a gzip-compressed data archive; extracting directly"
               tar -xzf "../$pkg.ipk" -C extract
             fi
-            # Entware payloads normally contain opt/..., but some mirrors/package
-            # endpoints can expose a payload with lib/include/etc. at its root.
+            echo "=== Payload layout for $pkg ==="
+            find extract -maxdepth 3 -type f -o -type l | head -40
+            # Entware payloads are normally rooted at ./opt/...; flatten that
+            # prefix so the sysroot itself becomes the Entware /opt tree.
             if [ -d extract/opt ]; then
               cp -a extract/opt/. "$SYSROOT/"
+            elif [ -d extract/./opt ]; then
+              cp -a extract/./opt/. "$SYSROOT/"
             else
               cp -a extract/. "$SYSROOT/"
             fi
