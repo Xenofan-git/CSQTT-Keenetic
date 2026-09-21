@@ -16,7 +16,7 @@ VK_REDIRECT_URI=http://ROUTER_IP:18081/api/vk/callback
 VK_CLIENT_ID=7793118
 VK_OAUTH_SCOPE=1073737727
 VK_API_VERSION=5.199
-VK_TOKEN_FILE=/opt/etc/csqт/vk-token.json
+VK_TOKEN_FILE=/opt/etc/csqtt/vk-token.json
 EOF
 chmod 600 "$BASE/vk-auth.env"
 fi
