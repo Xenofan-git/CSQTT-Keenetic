@@ -112,7 +112,7 @@ jobs:
           export PKG_CONFIG_LIBDIR="$SYSROOT/lib/pkgconfig:$SYSROOT/share/pkgconfig:$SYSROOT/usr/lib/pkgconfig:$SYSROOT/usr/share/pkgconfig"
           cd "$RUNNER_TEMP/harfbuzz-${HB_VERSION}"
           meson setup build-hb --cross-file "$RUNNER_TEMP/harfbuzz-cross.txt" --prefix=/opt/hb --libdir=lib --buildtype=minsize \
-            -Dglib=disabled -Dfreetype=disabled -Dicu=disabled -Dgraphite2=disabled \
+            -Dglib=disabled -Dfreetype=disabled -Dicu=enabled -Dgraphite2=disabled \
             -Dcairo=disabled -Dtests=disabled -Ddocs=disabled -Dutilities=disabled -Dbenchmark=disabled
           meson compile -C build-hb
           DESTDIR="$RUNNER_TEMP/hb-install" meson install -C build-hb
