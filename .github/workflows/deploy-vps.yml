@@ -16,11 +16,10 @@ jobs:
       - name: Build ARM64 package
         uses: docker://golang:1.25-bookworm
         with:
-          args: >
-            bash -lc '
-            cd "$GITHUB_WORKSPACE/tools/vk-auth" &&
-            mkdir -p "$GITHUB_WORKSPACE/dist" &&
-            CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags="-s -w" -o "$GITHUB_WORKSPACE/dist/csqtt-vk-auth" .'
+          args: >-
+            go build -trimpath -ldflags="-s -w"
+            -o /github/workspace/dist/csqtt-vk-auth
+            /github/workspace/tools/vk-auth
 
       - name: Prepare package
         shell: bash
@@ -40,8 +39,7 @@ jobs:
           set -euxo pipefail
           test -n "$VPS_SSH_KEY"
           install -d -m 700 ~/.ssh
-          printf '%s
-' "$VPS_SSH_KEY" > ~/.ssh/id_ed25519
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
           ssh-keyscan -p "${{ secrets.VPS_PORT || 22 }}" "${{ secrets.VPS_HOST }}" >> ~/.ssh/known_hosts
 
