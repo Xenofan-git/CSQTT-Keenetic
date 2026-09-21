@@ -54,7 +54,7 @@ jobs:
             cd "$GITHUB_WORKSPACE"
           }
           # Entware uses libpcre2 as the PCRE2 package name.
-          for p in libc libgcc libstdcpp glib2 icu libsoup3 libfreetype fontconfig libpng libjpeg-turbo zlib libxml2 libxslt libffi libpcre2 libsqlite3 libopenssl libcares libpsl libidn2 libunistring libbrotlidec libbrotlienc libbrotlicommon libatomic libbz2 libzstd libexpat; do
+          for p in libc libgcc libstdcpp glib2 icu libsoup3 libfreetype fontconfig libpng libjpeg-turbo zlib libxml2 libxslt libffi libpcre2 libsqlite3 libopenssl libcares libpsl libidn2 libunistring libbrotlidec libbrotlienc libbrotlicommon libatomic libbz2 libzstd libexpat harfbuzz; do
             extract_pkg "$p"
           done
           mkdir -p "$SYSROOT/lib" "$SYSROOT/usr/lib"
