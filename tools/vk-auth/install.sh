@@ -2,7 +2,7 @@
 set -eu
 
 BASE=/opt/etc/csqtt
-BIN=/opt/bin/csqт-vk-auth
+BIN=/opt/bin/csqtt-vk-auth
 INIT=/opt/etc/init.d/S98csqtt-vk-auth
 
 mkdir -p "$BASE" /opt/bin /opt/etc/init.d
