@@ -1,13 +1,13 @@
 #!/bin/sh
 set -eu
 
-BASE=/opt/etc/csqт
+BASE=/opt/etc/csqtt
 BIN=/opt/bin/csqт-vk-auth
-INIT=/opt/etc/init.d/S98csqт-vk-auth
+INIT=/opt/etc/init.d/S98csqtt-vk-auth
 
 mkdir -p "$BASE" /opt/bin /opt/etc/init.d
-install -m 0755 csqт-vk-auth "$BIN"
-install -m 0755 S98csqт-vk-auth "$INIT"
+install -m 0755 csqtt-vk-auth "$BIN"
+install -m 0755 S98csqtt-vk-auth "$INIT"
 
 if [ ! -f "$BASE/vk-auth.env" ]; then
 cat > "$BASE/vk-auth.env" <<'EOF'
