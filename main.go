@@ -705,13 +705,24 @@ func main() {
 
         lines := make(chan string, 128)
         events := make(chan clientEvent, 64)
+        clientAlerts := make(chan string, 4)
         go func() {
-            defer close(lines); defer close(events)
+            defer close(lines); defer close(events); defer close(clientAlerts)
             scanner := bufio.NewScanner(stdout)
             scanner.Buffer(make([]byte, 4096), 1024*1024)
             for scanner.Scan() {
                 line := scanner.Text()
                 log.Printf("CLIENT %s", line)
+                if managerVKHashMode == "auto_js" {
+                    lower := strings.ToLower(line)
+                    if strings.Contains(lower, "captcha_wait_required") ||
+                        strings.Contains(lower, "captcha session rate limit reached") ||
+                        strings.Contains(lower, "global lockout active") ||
+                        strings.Contains(lower, "automatic captcha chain failed") ||
+                        strings.Contains(lower, "manual fallback failed") {
+                        select { case clientAlerts <- line: default: }
+                    }
+                }
                 if ev, ok := parseClientEvent(line); ok { select { case events <- ev: default: } }
                 select { case lines <- line: case <-ctx.Done(): return }
             }
@@ -803,11 +814,27 @@ func main() {
             case <-zeroC:
                 if activeWorkers == 0 { select { case recovery <- "workers_zero_refresh": default: } }
                 zeroTimer=nil; zeroC=nil
+            case alert, ok := <-clientAlerts:
+                if !ok { clientAlerts = nil; continue }
+                runtime.Stage = "error"
+                runtime.ClientRunning = false
+                runtime.Error = "auto_vk_captcha_exhausted"
+                runtime.HashNotice = "Авто ВК исчерпал попытки проверки CAPTCHA. Требуется ручная проверка VK."
+                runtime.HashNoticeAt = time.Now().UTC().Format(time.RFC3339)
+                writeVKRuntime(c, runtime)
+                log.Printf("Auto VK CAPTCHA attempts exhausted: %s", alert)
+                stopCurrentClient()
+                sessionEnded = true
             case reason := <-recovery:
                 if reason != "" { sessionEnded=true; log.Printf("transport recovery requested: %s", reason) }
             case err := <-clientDone:
                 runtime.ClientRunning=false; runtime.Stage="client_stopped"
-                if err != nil { runtime.Error=err.Error(); log.Printf("client exited: %v", err) } else { log.Printf("client exited cleanly") }
+                if err != nil {
+                    if runtime.Error != "auto_vk_captcha_exhausted" {
+                        runtime.Error=err.Error()
+                    }
+                    log.Printf("client exited: %v", err)
+                } else { log.Printf("client exited cleanly") }
                 sessionEnded=true
             case <-ctx.Done():
                 _=cmd.Process.Kill(); <-clientDone; clientStdin.Close(); finishAutoCalls(autoCallIDs); _=ip("link","set","dev",tunName,"down"); return
