@@ -394,18 +394,20 @@ func submitCaptchaResult(session, result string) error {
 }
 
 func parseClientEvent(line string) (clientEvent, bool) {
+    line = strings.TrimSpace(line)
     const prefix = "__CSQTT_EVENT__|"
+    if strings.HasPrefix(line, "CAPTCHA_SOLVE|") {
+        body := strings.TrimPrefix(line, "CAPTCHA_SOLVE|")
+        parts := strings.SplitN(body, "|", 3)
+        if len(parts) != 3 { return clientEvent{}, false }
+        return clientEvent{Kind: "CAPTCHA_SOLVE", Mode: strings.TrimSpace(parts[0]), RedirectURI: strings.TrimSpace(parts[1]), SessionToken: strings.TrimSpace(parts[2])}, true
+    }
     if !strings.HasPrefix(line, prefix) { return clientEvent{}, false }
     rest := strings.TrimPrefix(line, prefix)
     p := strings.IndexByte(rest, '|')
     if p < 0 { return clientEvent{}, false }
     kind := rest[:p]
     body := rest[p+1:]
-    if kind == "CAPTCHA_SOLVE" {
-        parts := strings.SplitN(body, "|", 3)
-        if len(parts) != 3 { return clientEvent{}, false }
-        return clientEvent{Kind: kind, Mode: strings.TrimSpace(parts[0]), RedirectURI: strings.TrimSpace(parts[1]), SessionToken: strings.TrimSpace(parts[2])}, true
-    }
     var payload struct {
         Hash string `json:"hash"`
         Code int `json:"code"`
