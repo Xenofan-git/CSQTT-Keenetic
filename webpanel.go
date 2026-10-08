@@ -52,6 +52,10 @@ func startCSQTTWebPanel() {
     mux.HandleFunc("/api/vk/session", csqttVKSession)
     mux.HandleFunc("/api/vk/oauth-url", csqttVKOAuthURL)
     mux.HandleFunc("/api/vk/status", csqttVKStatus)
+    mux.HandleFunc("/api/captcha/state", csqttCaptchaState)
+    mux.HandleFunc("/api/captcha/result", csqttCaptchaResult)
+    mux.HandleFunc("/api/captcha/cancel", csqttCaptchaCancel)
+    mux.HandleFunc("/captcha", csqttCaptchaPage)
     mux.HandleFunc("/api/vk/mode", csqttSetVKMode)
     mux.HandleFunc("/api/tunnel/toggle", csqttTunnelToggle)
     mux.HandleFunc("/api/config", csqttConfigStatus)
@@ -195,6 +199,72 @@ func csqttPanel(w http.ResponseWriter, r *http.Request) {
     }{OAuthURL: vkOAuthURL()}
     w.Header().Set("Content-Type", "text/html; charset=utf-8")
     _ = csqttPanelTemplate.Execute(w, data)
+}
+
+func csqttCaptchaState(w http.ResponseWriter, r *http.Request) {
+    if r.Method != http.MethodGet { http.Error(w, "method not allowed", http.StatusMethodNotAllowed); return }
+    st := getCaptchaRuntime()
+    writeJSON(w, map[string]any{
+        "ok": true, "pending": st.Pending, "mode": st.Mode,
+        "redirectUri": st.RedirectURI, "sessionToken": st.SessionToken,
+        "updatedAt": st.UpdatedAt,
+    })
+}
+
+func csqttCaptchaResult(w http.ResponseWriter, r *http.Request) {
+    if r.Method != http.MethodPost { http.Error(w, "method not allowed", http.StatusMethodNotAllowed); return }
+    var req struct { SessionToken string `json:"sessionToken"`; Result string `json:"result"` }
+    if err := json.NewDecoder(r.Body).Decode(&req); err != nil { http.Error(w, "invalid json", http.StatusBadRequest); return }
+    if err := submitCaptchaResult(req.SessionToken, req.Result); err != nil {
+        writeJSON(w, map[string]any{"ok": false, "error": err.Error()})
+        return
+    }
+    writeJSON(w, map[string]any{"ok": true})
+}
+
+func csqttCaptchaCancel(w http.ResponseWriter, r *http.Request) {
+    if r.Method != http.MethodPost { http.Error(w, "method not allowed", http.StatusMethodNotAllowed); return }
+    st := getCaptchaRuntime()
+    if !st.Pending { writeJSON(w, map[string]any{"ok": true}); return }
+    if err := submitCaptchaResult(st.SessionToken, "error:cancelled"); err != nil {
+        writeJSON(w, map[string]any{"ok": false, "error": err.Error()})
+        return
+    }
+    writeJSON(w, map[string]any{"ok": true})
+}
+
+func csqttCaptchaPage(w http.ResponseWriter, r *http.Request) {
+    if r.Method != http.MethodGet { http.Error(w, "method not allowed", http.StatusMethodNotAllowed); return }
+    w.Header().Set("Content-Type", "text/html; charset=utf-8")
+    w.Header().Set("Cache-Control", "no-store")
+    _, _ = w.Write([]byte(`<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CSQTT — VK CAPTCHA</title>
+<style>body{font-family:system-ui;background:#101114;color:#eee;margin:0;padding:24px}main{max-width:760px;margin:auto}button{padding:12px 18px;margin:6px;border:0;border-radius:10px;cursor:pointer}iframe{width:100%;height:620px;border:1px solid #444;border-radius:12px;background:#fff}.ok{color:#67e8a5}.warn{color:#f6c85f}.small{opacity:.75;font-size:13px}textarea{width:100%;height:90px;box-sizing:border-box}</style></head>
+<body><main><h2>VK CAPTCHA</h2><p id="status" class="warn">Проверяю ожидающую CAPTCHA…</p>
+<p><button id="open">Открыть CAPTCHA в окне</button><button id="cancel">Отменить</button></p>
+<div id="frame"></div><p class="small">Если браузерный bridge установлен на VK, результат будет передан автоматически. Без bridge можно вставить полученный результат вручную.</p>
+<textarea id="manual" placeholder="Вставьте success_token"></textarea><p><button id="submit">Передать результат</button></p>
+<script>
+let state=null;
+async function poll(){
+  try{
+    const r=await fetch('/api/captcha/state',{cache:'no-store'}); state=await r.json();
+    const st=document.getElementById('status');
+    if(!state.pending){st.textContent='CAPTCHA сейчас не ожидается.';st.className='ok';return;}
+    st.textContent='Ожидается решение CAPTCHA. Режим: '+(state.mode||'auto');
+    document.getElementById('open').onclick=()=>window.open(state.redirectUri,'csqtt_vk_captcha','width=520,height=760,resizable=yes,scrollbars=yes');
+    document.getElementById('submit').onclick=async()=>{
+      const result=document.getElementById('manual').value.trim();
+      if(!result)return;
+      const x=await fetch('/api/captcha/result',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionToken:state.sessionToken,result})});
+      const j=await x.json(); st.textContent=j.ok?'CAPTCHA передана клиенту ✓':('Ошибка: '+(j.error||'unknown'));
+    };
+    document.getElementById('cancel').onclick=async()=>{await fetch('/api/captcha/cancel',{method:'POST'});poll();};
+  }catch(e){document.getElementById('status').textContent='Ошибка связи с CSQTT: '+e;}
+}
+poll(); setInterval(poll,1500);
+</script></main></body></html>`))
 }
 
 func csqttVKUserScript(w http.ResponseWriter, r *http.Request) {
