@@ -323,6 +323,74 @@ type clientEvent struct {
     Hash string
     Code int
     Active int
+    Mode string
+    RedirectURI string
+    SessionToken string
+}
+
+type captchaRuntimeState struct {
+    Pending bool   `json:"pending"`
+    Mode string   `json:"mode,omitempty"`
+    RedirectURI string `json:"redirectUri,omitempty"`
+    SessionToken string `json:"sessionToken,omitempty"`
+    UpdatedAt string `json:"updatedAt,omitempty"`
+}
+
+var captchaRuntimeMu sync.Mutex
+var captchaRuntime captchaRuntimeState
+var captchaStdinMu sync.Mutex
+var captchaStdin io.Writer
+
+func setCaptchaPending(ev clientEvent) {
+    if ev.RedirectURI == "" || ev.SessionToken == "" { return }
+    captchaRuntimeMu.Lock()
+    captchaRuntime = captchaRuntimeState{
+        Pending: true, Mode: ev.Mode, RedirectURI: ev.RedirectURI,
+        SessionToken: ev.SessionToken, UpdatedAt: time.Now().UTC().Format(time.RFC3339),
+    }
+    captchaRuntimeMu.Unlock()
+}
+
+func getCaptchaRuntime() captchaRuntimeState {
+    captchaRuntimeMu.Lock()
+    defer captchaRuntimeMu.Unlock()
+    return captchaRuntime
+}
+
+func clearCaptchaPending(session string) {
+    captchaRuntimeMu.Lock()
+    if session == "" || session == captchaRuntime.SessionToken {
+        captchaRuntime = captchaRuntimeState{}
+    }
+    captchaRuntimeMu.Unlock()
+}
+
+func setCaptchaStdin(w io.Writer) {
+    captchaStdinMu.Lock()
+    captchaStdin = w
+    captchaStdinMu.Unlock()
+}
+
+func submitCaptchaResult(session, result string) error {
+    result = strings.TrimSpace(result)
+    session = strings.TrimSpace(session)
+    if result == "" || len(result) > 16384 || strings.ContainsAny(result, "\\r\\n") {
+        return fmt.Errorf("invalid CAPTCHA result")
+    }
+    captchaRuntimeMu.Lock()
+    pending := captchaRuntime.Pending && session != "" && session == captchaRuntime.SessionToken
+    captchaRuntimeMu.Unlock()
+    if !pending { return fmt.Errorf("no matching CAPTCHA session") }
+
+    captchaStdinMu.Lock()
+    defer captchaStdinMu.Unlock()
+    if captchaStdin == nil { return fmt.Errorf("CSQTT client control channel is unavailable") }
+    if _, err := io.WriteString(captchaStdin, "CAPTCHA_RESULT|"+result+"\\n"); err != nil {
+        return fmt.Errorf("send CAPTCHA result: %w", err)
+    }
+    clearCaptchaPending(session)
+    log.Printf("CAPTCHA result submitted to CSQTT client")
+    return nil
 }
 
 func parseClientEvent(line string) (clientEvent, bool) {
@@ -331,13 +399,20 @@ func parseClientEvent(line string) (clientEvent, bool) {
     rest := strings.TrimPrefix(line, prefix)
     p := strings.IndexByte(rest, '|')
     if p < 0 { return clientEvent{}, false }
+    kind := rest[:p]
+    body := rest[p+1:]
+    if kind == "CAPTCHA_SOLVE" {
+        parts := strings.SplitN(body, "|", 3)
+        if len(parts) != 3 { return clientEvent{}, false }
+        return clientEvent{Kind: kind, Mode: strings.TrimSpace(parts[0]), RedirectURI: strings.TrimSpace(parts[1]), SessionToken: strings.TrimSpace(parts[2])}, true
+    }
     var payload struct {
         Hash string `json:"hash"`
         Code int `json:"code"`
         Active int `json:"active"`
     }
-    if err := json.Unmarshal([]byte(rest[p+1:]), &payload); err != nil { return clientEvent{}, false }
-    return clientEvent{Kind: rest[:p], Hash: strings.TrimSpace(payload.Hash), Code: payload.Code, Active: payload.Active}, true
+    if err := json.Unmarshal([]byte(body), &payload); err != nil { return clientEvent{}, false }
+    return clientEvent{Kind: kind, Hash: strings.TrimSpace(payload.Hash), Code: payload.Code, Active: payload.Active}, true
 }
 
 func waitForTUNCONF(lines <-chan string, timeout time.Duration) (string, error) {
@@ -556,6 +631,7 @@ func main() {
             log.Fatalf("start client: %v", err)
         }
         setCurrentClient(cmd.Process)
+        setCaptchaStdin(clientStdin)
         runtime.Stage = "client_started"
         runtime.ClientStarted = true
         runtime.ClientRunning = true
@@ -626,6 +702,10 @@ func main() {
             case ev, ok := <-events:
                 if !ok { events = nil; continue }
                 switch ev.Kind {
+                case "CAPTCHA_SOLVE":
+                    setCaptchaPending(ev)
+                    log.Printf("CAPTCHA pending: mode=%s session=%s", ev.Mode, ev.SessionToken)
+
                 case "CALL_UNAVAILABLE":
                     if c.VKHashMode == "manual" && !c.AllowHashRedistribution {
                         unavailableManual[ev.Hash] = true
@@ -655,6 +735,8 @@ func main() {
         if zeroTimer != nil { if !zeroTimer.Stop() { select { case <-zeroTimer.C: default: } } }
         select { case <-clientDone: default: _=cmd.Process.Kill(); <-clientDone }
         clientStdin.Close()
+        setCaptchaStdin(nil)
+        clearCaptchaPending("")
         finishAutoCalls(autoCallIDs); autoCallIDs=nil
 
         if managerVKHashMode == "manual" && len(unavailableManual) > 0 {
