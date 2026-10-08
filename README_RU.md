@@ -33,14 +33,25 @@ Linux/Entware-менеджер для существующего нативно�
 
 Пароли SSH/VPS не сохраняются в конфигурацию CSQTT; они используются только во время операции deploy.
 
+## CAPTCHA fallback
+
+- основной режим остаётся автоматическим (`captcha_mode=auto`);
+- CSQTT 2.1.9 уже выполняет автоматическую цепочку CAPTCHA и при необходимости выводит `CAPTCHA_SOLVE|mode|redirect_uri|session_token`;
+- ARM64-менеджер перехватывает это событие и не перезапускает клиент;
+- Web Panel `/captcha` открывает реальную VK CAPTCHA в отдельном окне;
+- установленный `captcha-bridge/` может автоматически передать `success_token` обратно;
+- если bridge недоступен, результат можно передать вручную через поле панели;
+- менеджер отправляет результат в работающий Rust client как `CAPTCHA_RESULT|<token>`;
+- отмена передаётся как `CAPTCHA_RESULT|error:cancelled`.
+
 ## Что пока НЕ делает
 
 - не меняет default route;
 - не делает policy routing;
 - не включает весь LAN в туннель;
 - не реализует полноценную авторизацию Web Panel;
-- не реализует полноценный VK OAuth/WebView login на роутере;
-- не реализует CAPTCHA UI;
+- не включает WPE browser runtime в основной бинарник менеджера: WPE остаётся отдельным auth-компонентом;
+- не заменяет CSQTT Web Panel интерфейсом LaLune;
 - не реализует HydraRoute failover.
 
 Это намеренно: сначала проверяем настоящий Rust-транспорт CSQTT на Keenetic. Маршрутизация и полноценное управление будут отдельными этапами.
@@ -92,5 +103,12 @@ GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -trimpath -ldflags='-s -w'
 ```
 
 Цель: ARM64 / Entware `aarch64-k3.10`.
+
+## Unified ARM64 branch
+
+Ветка `arm64-entware-unified` объединяет CSQTT как основной проект с выбранными Linux/ARM64 элементами LaLune-NanoPi-ARM64 и WPE-Auth-Entware. Матрица переноса находится в `ARM64_INTEGRATION_MATRIX.md`.
+
+LaLune UI, VPN routing, WireGuard и policy routing в эту ветку не импортируются.
+
 
 Локальный ARM64 binary `CSQTT-Keenetic` собран статически. На x86-хосте ARM64 test binary запускать нельзя, поэтому cross-`go test` не используется как runtime-тест.
