@@ -1,5 +1,13 @@
 # CSQTT ARM64/Entware integration matrix
 
+## Pinned provenance
+
+- CSQTT-Keenetic base: `a7ea295cb8360367ae4ede70f37d87e136eb323b`
+- LaLune upstream reference: `Endlad2/LaLune @ e4a6d08b63aef6025bf8ad8f77da660ea552e04b`
+- LaLune-NanoPi-ARM64 reference: `8d1e095a58419723adea5f8040eb17d0c67496d4`
+- WPE-Auth-Entware current auth ref: `a42c81c53fbd6d6e789384877bf48d01dc74875f`
+- Proven CSQTT server dataplane: `XXcipherX/csqtt-server @ 0a1e789fdc05442705aa0c5f3b7ab5e91984436a`
+
 | Area | CSQTT-Keenetic | LaLune | LaLune-NanoPi-ARM64 | WPE-Auth-Entware | Action |
 |---|---|---|---|---|---|
 | Web panel/UI | Existing CSQTT web panel | Flutter/LaLune UI | Headless API/panel skeleton | None | KEEP CSQTT UI |
